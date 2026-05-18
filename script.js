@@ -28,7 +28,7 @@ const defaultRolePermissions = {
   BM: ["dashboard", "bmReview"],
   ZBM: ["dashboard", "reports"],
   ZM: ["dashboard", "reports"],
-  HR: ["dashboard", "reports", "audit"],
+  HRBP: ["dashboard", "reports", "audit"],
   ZQA: ["dashboard", "validation", "reports"],
   Admin: MODULES.map((item) => item.key)
 };
@@ -37,11 +37,11 @@ const defaultRoleCatalog = [
   { key: "Staff", label: "Staff", type: "Branch", locked: true },
   { key: "BQA", label: "BQA", type: "Branch", locked: true },
   { key: "BM", label: "BM", type: "Branch", locked: true },
+  { key: "Admin", label: "Admin", type: "Branch", locked: true },
   { key: "ZBM", label: "ZBM", type: "Zonal", locked: true },
   { key: "ZM", label: "ZM", type: "Zonal", locked: true },
-  { key: "HR", label: "HR", type: "Zonal", locked: true },
   { key: "ZQA", label: "ZQA", type: "Zonal", locked: true },
-  { key: "Admin", label: "Admin", type: "Zonal", locked: true }
+  { key: "HRBP", label: "HRBP", type: "Zonal", locked: true }
 ];
 
 const branches = [
@@ -139,6 +139,14 @@ function loadState() {
     if (!stored) return structuredClone(baseState);
     const merged = { ...structuredClone(baseState), ...stored };
     if (!merged.roleCatalog) merged.roleCatalog = structuredClone(defaultRoleCatalog);
+    // Migrate HR → HRBP
+    const hrEntry = merged.roleCatalog.find((r) => r.key === "HR");
+    if (hrEntry) { hrEntry.key = "HRBP"; hrEntry.label = "HRBP"; }
+    if (merged.rolePermissions["HR"]) { merged.rolePermissions["HRBP"] = merged.rolePermissions["HR"]; delete merged.rolePermissions["HR"]; }
+    merged.users = (merged.users || []).map((u) => u.role === "HR" ? { ...u, role: "HRBP" } : u);
+    // Migrate Admin to Branch type
+    const adminEntry = merged.roleCatalog.find((r) => r.key === "Admin");
+    if (adminEntry) adminEntry.type = "Branch";
     defaultRoleCatalog.forEach((def) => {
       if (!merged.roleCatalog.find((r) => r.key === def.key)) merged.roleCatalog.push({ ...def });
     });
