@@ -1,4 +1,5 @@
 const STORAGE_KEY = "vvdt-rollout-state-v4";
+const BACKUP_KEYS = ["vvdt-backup-1", "vvdt-backup-2", "vvdt-backup-3"];
 
 const MODULES = [
   { key: "dashboard", label: "Dashboard" },
@@ -37,7 +38,7 @@ const defaultRoleCatalog = [
   { key: "Staff", label: "Staff", type: "Branch", locked: true },
   { key: "BQA", label: "BQA", type: "Branch", locked: true },
   { key: "BM", label: "BM", type: "Branch", locked: true },
-  { key: "Admin", label: "Admin", type: "Branch", locked: true },
+  { key: "Admin", label: "Admin", type: "Super", locked: true },
   { key: "ZBM", label: "ZBM", type: "Zonal", locked: true },
   { key: "ZM", label: "ZM", type: "Zonal", locked: true },
   { key: "ZQA", label: "ZQA", type: "Zonal", locked: true },
@@ -102,6 +103,7 @@ const baseState = {
   activeView: "dashboard",
   authMode: "login",
   reportPeriod: "Daily",
+  editingBranchId: null,
   roleCatalog: structuredClone(defaultRoleCatalog),
   rolePermissions: structuredClone(defaultRolePermissions),
   branches,
@@ -144,9 +146,9 @@ function loadState() {
     if (hrEntry) { hrEntry.key = "HRBP"; hrEntry.label = "HRBP"; }
     if (merged.rolePermissions["HR"]) { merged.rolePermissions["HRBP"] = merged.rolePermissions["HR"]; delete merged.rolePermissions["HR"]; }
     merged.users = (merged.users || []).map((u) => u.role === "HR" ? { ...u, role: "HRBP" } : u);
-    // Migrate Admin to Branch type
+    // Migrate Admin to Super type
     const adminEntry = merged.roleCatalog.find((r) => r.key === "Admin");
-    if (adminEntry) adminEntry.type = "Branch";
+    if (adminEntry) adminEntry.type = "Super";
     defaultRoleCatalog.forEach((def) => {
       if (!merged.roleCatalog.find((r) => r.key === def.key)) merged.roleCatalog.push({ ...def });
     });
@@ -160,7 +162,39 @@ function loadState() {
 }
 
 function saveState() {
+  try {
+    const current = localStorage.getItem(STORAGE_KEY);
+    if (current) {
+      const b1 = localStorage.getItem(BACKUP_KEYS[0]);
+      const b2 = localStorage.getItem(BACKUP_KEYS[1]);
+      if (b2) localStorage.setItem(BACKUP_KEYS[2], b2);
+      if (b1) localStorage.setItem(BACKUP_KEYS[1], b1);
+      localStorage.setItem(BACKUP_KEYS[0], current);
+    }
+  } catch {}
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function backupSnapshots() {
+  return BACKUP_KEYS.map((key, i) => {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return { slot: i + 1, key, label: `Backup ${i + 1}`, users: parsed.users?.length || 0, entries: parsed.entries?.length || 0 };
+    } catch { return null; }
+  }).filter(Boolean);
+}
+
+function restoreBackup(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return alert("Backup not found.");
+    state = JSON.parse(raw);
+    addAudit("State restored from backup", key);
+    saveState();
+    render();
+  } catch { alert("Failed to restore backup."); }
 }
 
 function normalizePhone(phone) {
@@ -203,6 +237,12 @@ function isZonalRole(role) {
   const catalog = state?.roleCatalog || defaultRoleCatalog;
   const entry = catalog.find((r) => r.key === role);
   return entry ? entry.type === "Zonal" : false;
+}
+
+function isSuperRole(role) {
+  const catalog = state?.roleCatalog || defaultRoleCatalog;
+  const entry = catalog.find((r) => r.key === role);
+  return entry ? entry.type === "Super" : false;
 }
 
 function ensureAllowedView(user) {
@@ -252,7 +292,7 @@ function performanceCategory(score) {
 
 function entriesVisibleTo(user) {
   if (!user) return [];
-  if (user.role === "Admin" || isZonalRole(user.role)) return state.entries;
+  if (isSuperRole(user.role) || isZonalRole(user.role)) return state.entries;
   if (user.role === "BQA" || user.role === "BM") return state.entries.filter((entry) => entry.branchId === user.branchId);
   return state.entries.filter((entry) => entry.userId === user.id);
 }
@@ -386,14 +426,18 @@ function signupForm() {
 }
 
 function appShell(user) {
+  const roleEntry = (state.roleCatalog || defaultRoleCatalog).find((r) => r.key === user.role);
+  const roleTypeBadge = roleEntry ? `<span class="role-type-badge ${roleEntry.type.toLowerCase()}" style="margin-left:0">${roleEntry.type}</span>` : "";
   return `
+    <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Menu">&#9776;</button>
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
     <div class="app-shell">
-      <aside class="sidebar">
-        <div class="brand-lockup"><span class="brand-mark">V</span><div><strong>VVDT</strong><small>Coastal Zone</small></div></div>
+      <aside class="sidebar" id="appSidebar">
+        <div class="brand-lockup"><img src="CRDB logo.png" alt="CRDB" class="brand-logo" /><div><strong>VVDT</strong><small>Coastal Zone</small></div></div>
         <nav>${NAV_MODULES.filter((item) => hasAccess(user, item.key)).map((item) => navButton(item.key, item.label)).join("")}</nav>
         <div class="sidebar-panel">
           <span>Logged in as</span>
-          <strong>${user.role}</strong>
+          <strong>${user.role} ${roleTypeBadge}</strong>
           <small>${user.name} · ${branchName(user.branchId)}</small>
         </div>
       </aside>
@@ -653,8 +697,18 @@ function reportsView(user) {
   const top = kpiRows[0];
   const under = kpiRows.find((row) => row.actual < row.kpi.target);
   return `
-    <section class="panel">
-      <div class="panel-heading"><div><span class="eyebrow">Reporting</span><h3>${state.reportPeriod} Performance Summary</h3></div><div class="segmented">${["Daily", "Weekly", "Monthly", "Quarterly"].map((period) => `<button class="${state.reportPeriod === period ? "active" : ""}" data-report-period="${period}" type="button">${period}</button>`).join("")}</div></div>
+    <section class="panel" id="reportsPrintArea">
+      <div class="panel-heading">
+        <div><span class="eyebrow">Reporting</span><h3>${state.reportPeriod} Performance Summary</h3></div>
+        <div class="report-toolbar">
+          <div class="segmented">${["Daily", "Weekly", "Monthly", "Quarterly"].map((period) => `<button class="${state.reportPeriod === period ? "active" : ""}" data-report-period="${period}" type="button">${period}</button>`).join("")}</div>
+          <div class="export-btns">
+            <button class="mini-action" data-export="csv" type="button">CSV</button>
+            <button class="mini-action" data-export="xls" type="button">XLS</button>
+            <button class="mini-action" data-export="pdf" type="button">PDF</button>
+          </div>
+        </div>
+      </div>
       <section class="metric-grid">
         ${metricCard("Total Entries", entries.length, `${state.reportPeriod} view`, Math.min(entries.length * 25, 100))}
         ${metricCard("Average Score", `${averageScore(entries).toFixed(1)}%`, performanceCategory(averageScore(entries)), averageScore(entries))}
@@ -667,6 +721,42 @@ function reportsView(user) {
       </div>
     </section>
   `;
+}
+
+function downloadFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportCSV(entries) {
+  const header = ["Date", "Staff", "Profile", "Branch", "Status", "Score (%)"];
+  const rows = entries.map((entry) => {
+    const user = state.users.find((u) => u.id === entry.userId);
+    const score = scoreEntry(entry).finalIndex.toFixed(1);
+    return [entry.date, user?.name || "", user?.profile || "", branchName(entry.branchId), entry.status, score];
+  });
+  const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  downloadFile(csv, `VVDT-${state.reportPeriod}-Report.csv`, "text/csv;charset=utf-8;");
+}
+
+function exportXLS(entries) {
+  const header = `<tr>${["Date","Staff","Profile","Branch","Status","Score (%)"].map((h) => `<th>${h}</th>`).join("")}</tr>`;
+  const rows = entries.map((entry) => {
+    const user = state.users.find((u) => u.id === entry.userId);
+    const score = scoreEntry(entry).finalIndex.toFixed(1);
+    return `<tr>${[entry.date, user?.name||"", user?.profile||"", branchName(entry.branchId), entry.status, score].map((c) => `<td>${c}</td>`).join("")}</tr>`;
+  }).join("");
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body><table>${header}${rows}</table></body></html>`;
+  downloadFile(html, `VVDT-${state.reportPeriod}-Report.xls`, "application/vnd.ms-excel;charset=utf-8;");
+}
+
+function exportPDF() {
+  window.print();
 }
 
 function auditView() {
@@ -686,7 +776,7 @@ function adminView(user) {
           <label>Phone Number <input name="phone" inputmode="tel" value="255700${String(Date.now()).slice(-6)}" required /></label>
           <label>Role
             <select name="role" id="adminRoleSelect">
-              ${catalog.map((r) => `<option value="${r.key}" data-type="${r.type}">${r.label} — ${r.type === "Zonal" ? "Zonal Staff" : "Branch Staff"}</option>`).join("")}
+              ${catalog.map((r) => `<option value="${r.key}" data-type="${r.type}">${r.label} — ${r.type === "Super" ? "Super (All Access)" : r.type === "Zonal" ? "Zonal Staff" : "Branch Staff"}</option>`).join("")}
             </select>
           </label>
           <label>Profile
@@ -721,7 +811,8 @@ function adminView(user) {
       <article class="panel wide">${demoAccessPanel()}</article>
     </section>
     <section class="panel"><div class="panel-heading"><div><span class="eyebrow">Users</span><h3>Active Directory</h3></div></div><div class="user-grid">${state.users.map((item) => `<article class="user-card"><b>${item.name}</b><span>${item.role} · ${item.profile}</span><small>${item.phone} · ${branchName(item.branchId)}</small></article>`).join("")}</div></section>
-    <section class="panel"><div class="panel-heading"><div><span class="eyebrow">Branches</span><h3>Branch Directory</h3></div><span class="status-pill">Sort code is unique ID</span></div><div class="table-wrap">${branchesTable()}</div></section>
+    <section class="panel"><div class="panel-heading"><div><span class="eyebrow">Branches</span><h3>Branch Directory</h3></div><span class="status-pill">${state.branches.length} branches · Sort code is unique ID</span></div>${branchManagementPanel()}</section>
+    ${backupPanel()}
   `;
 }
 
@@ -733,7 +824,7 @@ function accessControlPanel() {
       ${catalog.map((roleEntry) => {
         const role = roleEntry.key;
         return `<fieldset>
-          <legend>${role} <span class="role-type-badge ${roleEntry.type === "Zonal" ? "zonal" : "branch"}">${roleEntry.type === "Zonal" ? "Zonal Staff" : "Branch Staff"}</span></legend>
+          <legend>${role} <span class="role-type-badge ${roleEntry.type === "Zonal" ? "zonal" : roleEntry.type === "Super" ? "super" : "branch"}">${roleEntry.type === "Super" ? "Super" : roleEntry.type === "Zonal" ? "Zonal Staff" : "Branch Staff"}</span></legend>
           ${MODULES.map((module) => `<label><input type="checkbox" name="${role}:${module.key}" ${roleModules(role).includes(module.key) ? "checked" : ""} ${role === "Admin" && ["dashboard", "admin", "demoAccess"].includes(module.key) ? "disabled" : ""} /> ${module.label}</label>`).join("")}
         </fieldset>`;
       }).join("")}
@@ -752,7 +843,7 @@ function roleManagementPanel() {
         <tbody>
           ${catalog.map((role) => `<tr>
             <td><strong>${role.label}</strong>${role.locked ? ` <span class="badge bqa-approved">System</span>` : ""}</td>
-            <td><span class="role-type-badge ${role.type === "Zonal" ? "zonal" : "branch"}">${role.type === "Zonal" ? "Zonal Staff" : "Branch Staff"}</span></td>
+            <td><span class="role-type-badge ${role.type === "Zonal" ? "zonal" : role.type === "Super" ? "super" : "branch"}">${role.type === "Super" ? "Super" : role.type === "Zonal" ? "Zonal Staff" : "Branch Staff"}</span></td>
             <td><small>${(state.rolePermissions[role.key] || []).join(", ") || "None"}</small></td>
             <td>${role.locked ? "" : `<button class="mini-action danger" data-delete-role="${role.key}" type="button">Delete</button>`}</td>
           </tr>`).join("")}
@@ -766,6 +857,7 @@ function roleManagementPanel() {
         <select name="roleType">
           <option value="Branch">Branch Staff — assigned to a specific branch</option>
           <option value="Zonal">Zonal Staff — zone-wide, no branch assignment</option>
+          <option value="Super">Super — full access, no branch restriction</option>
         </select>
       </label>
       <div class="span-2">
@@ -787,11 +879,81 @@ function demoAccessPanel() {
   `;
 }
 
-function branchesTable() {
-  return `<table><thead><tr><th>Sort Code</th><th>Branch Name</th><th>Classification</th><th>Zone</th><th>Status</th></tr></thead><tbody>${state.branches.map((branch) => `<tr><td><strong>${branch.code}</strong></td><td>${branch.name}</td><td>${branch.classification}</td><td>${branch.location}</td><td><span class="badge bqa-approved">Active</span></td></tr>`).join("")}</tbody></table>`;
+function branchManagementPanel() {
+  const editing = state.editingBranchId;
+  const rows = state.branches.map((branch) => {
+    if (editing === branch.id) {
+      return `<tr class="edit-row">
+        <td><input name="edit-code" value="${branch.code}" readonly style="width:72px;font-weight:900" /></td>
+        <td><input name="edit-name" value="${branch.name}" style="width:100%" required /></td>
+        <td><select name="edit-class">
+          ${["Small", "Medium", "Big"].map((c) => `<option${c === branch.classification ? " selected" : ""}>${c}</option>`).join("")}
+        </select></td>
+        <td>${branch.location}</td>
+        <td><span class="badge bqa-approved">Active</span></td>
+        <td>
+          <button class="mini-action" data-save-branch="${branch.id}" type="button">Save</button>
+          <button class="mini-action muted" data-edit-branch="" type="button">Cancel</button>
+        </td>
+      </tr>`;
+    }
+    const assigned = state.users.filter((u) => u.branchId === branch.id).length;
+    return `<tr>
+      <td><strong>${branch.code}</strong></td>
+      <td>${branch.name}</td>
+      <td>${branch.classification}</td>
+      <td>${branch.location}</td>
+      <td><span class="badge bqa-approved">Active</span><small style="display:block;color:var(--muted)">${assigned} user${assigned !== 1 ? "s" : ""}</small></td>
+      <td>
+        <button class="mini-action muted" data-edit-branch="${branch.id}" type="button">Edit</button>
+        <button class="mini-action danger" data-delete-branch="${branch.id}" type="button">Delete</button>
+      </td>
+    </tr>`;
+  }).join("");
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Sort Code</th><th>Branch Name</th><th>Classification</th><th>Zone</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="branchTableBody">${rows}</tbody>
+      </table>
+    </div>
+    <div class="panel-heading" style="margin-top:1.5rem"><div><span class="eyebrow">New Branch</span><h3>Add Branch</h3></div></div>
+    <form class="entry-form" id="addBranchForm">
+      <label>Sort Code <input name="code" placeholder="e.g. 3400" maxlength="6" required /></label>
+      <label>Branch Name <input name="name" placeholder="e.g. Kilwa" required /></label>
+      <label>Classification
+        <select name="classification">
+          <option>Small</option><option>Medium</option><option>Big</option>
+        </select>
+      </label>
+      <button class="secondary-action" type="submit">Add Branch</button>
+    </form>
+  `;
+}
+
+function backupPanel() {
+  const snaps = backupSnapshots();
+  return `
+    <section class="panel">
+      <div class="panel-heading"><div><span class="eyebrow">Data Safety</span><h3>Backup & Restore</h3></div><span class="status-pill">${snaps.length} snapshot${snaps.length !== 1 ? "s" : ""} saved</span></div>
+      <p class="body-copy">A snapshot is saved automatically before every state change. Restore from any of the last 3 checkpoints below.</p>
+      ${snaps.length ? `<div class="backup-grid">${snaps.map((s) => `<div class="report-tile"><b>${s.label}</b><span>${s.users} users · ${s.entries} entries</span><button class="secondary-action" data-restore-backup="${s.key}" type="button" style="margin-top:8px">Restore</button></div>`).join("")}</div>` : `<p class="empty-state">No backups yet — they appear after the first data change.</p>`}
+    </section>
+  `;
 }
 
 function bindEvents() {
+  const sidebarToggle = document.querySelector("#sidebarToggle");
+  const appSidebar = document.querySelector("#appSidebar");
+  const sidebarOverlay = document.querySelector("#sidebarOverlay");
+  if (sidebarToggle && appSidebar) {
+    const openSidebar = () => { appSidebar.classList.add("open"); sidebarOverlay?.classList.add("visible"); };
+    const closeSidebar = () => { appSidebar.classList.remove("open"); sidebarOverlay?.classList.remove("visible"); };
+    sidebarToggle.addEventListener("click", openSidebar);
+    sidebarOverlay?.addEventListener("click", closeSidebar);
+    appSidebar.querySelectorAll("[data-view]").forEach((btn) => btn.addEventListener("click", closeSidebar));
+  }
+
   document.querySelectorAll("[data-auth-mode]").forEach((button) => {
     button.addEventListener("click", () => {
       state.authMode = button.dataset.authMode;
@@ -923,9 +1085,9 @@ function bindEvents() {
   if (roleSelect && branchWrap) {
     const syncBranchField = () => {
       const selected = roleSelect.options[roleSelect.selectedIndex];
-      const isZonal = selected?.dataset.type === "Zonal";
-      branchWrap.style.display = isZonal ? "none" : "";
-      if (zonalNote) zonalNote.style.display = isZonal ? "block" : "none";
+      const noBranch = selected?.dataset.type === "Zonal" || selected?.dataset.type === "Super";
+      branchWrap.style.display = noBranch ? "none" : "";
+      if (zonalNote) zonalNote.style.display = noBranch ? "block" : "none";
     };
     roleSelect.addEventListener("change", syncBranchField);
     syncBranchField();
@@ -962,6 +1124,73 @@ function bindEvents() {
     });
   });
 
+  document.querySelectorAll("[data-edit-branch]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.editingBranchId = button.dataset.editBranch || null;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-save-branch]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.saveBranch;
+      const row = button.closest("tr");
+      const name = row.querySelector("[name='edit-name']")?.value.trim();
+      const cls = row.querySelector("[name='edit-class']")?.value;
+      if (!name) return alert("Branch name is required.");
+      state.branches = state.branches.map((b) => b.id === id ? { ...b, name, classification: cls } : b);
+      state.editingBranchId = null;
+      addAudit("Branch updated", id, `${name} · ${cls}`);
+      saveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-branch]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.deleteBranch;
+      const branch = state.branches.find((b) => b.id === id);
+      if (!branch) return;
+      if (state.users.some((u) => u.branchId === id)) return alert(`Cannot delete "${branch.name}" — users are assigned to it. Reassign them first.`);
+      if (!confirm(`Delete branch "${branch.name}" (${branch.code})? This cannot be undone.`)) return;
+      state.branches = state.branches.filter((b) => b.id !== id);
+      addAudit("Branch deleted", branch.code);
+      saveState();
+      render();
+    });
+  });
+
+  document.querySelector("#addBranchForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const code = String(form.get("code")).trim();
+    const name = String(form.get("name")).trim();
+    if (state.branches.some((b) => b.code === code)) return alert(`Sort code "${code}" already exists.`);
+    const branch = { id: code, code, name, classification: form.get("classification"), location: "Coastal Zone", targetStatus: 70 };
+    state.branches.push(branch);
+    addAudit("Branch added", code, name);
+    saveState();
+    render();
+  });
+
+  document.querySelectorAll("[data-restore-backup]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.restoreBackup;
+      if (!confirm("Restore this backup? Your current session data will be replaced.")) return;
+      restoreBackup(key);
+    });
+  });
+
+  document.querySelectorAll("[data-export]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const user = activeUser();
+      const entries = periodEntries(entriesVisibleTo(user));
+      if (button.dataset.export === "csv") exportCSV(entries);
+      else if (button.dataset.export === "xls") exportXLS(entries);
+      else if (button.dataset.export === "pdf") exportPDF();
+    });
+  });
+
   document.querySelector("#permissionForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -985,7 +1214,7 @@ function bindEvents() {
 function createUser(form, forcedRole) {
   const role = forcedRole || form.get("role");
   const password = String(form.get("password") || createRandomPassword());
-  const zonal = isZonalRole(role);
+  const noBranch = isZonalRole(role) || isSuperRole(role);
   const user = {
     id: Date.now(),
     staffNo: `USR${String(state.users.length + 1).padStart(3, "0")}`,
@@ -994,7 +1223,7 @@ function createUser(form, forcedRole) {
     password,
     role,
     profile: String(form.get("profile")),
-    branchId: zonal ? "zonal" : String(form.get("branchId")),
+    branchId: noBranch ? "zonal" : String(form.get("branchId")),
     active: true
   };
   state.users.push(user);
