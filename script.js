@@ -162,18 +162,48 @@ function loadState() {
   }
 }
 
-function saveState() {
+async function saveState() {
   try {
+    // Keep existing browser storage for safety during migration
     const current = localStorage.getItem(STORAGE_KEY);
+
     if (current) {
       const b1 = localStorage.getItem(BACKUP_KEYS[0]);
       const b2 = localStorage.getItem(BACKUP_KEYS[1]);
+
       if (b2) localStorage.setItem(BACKUP_KEYS[2], b2);
       if (b1) localStorage.setItem(BACKUP_KEYS[1], b1);
+
       localStorage.setItem(BACKUP_KEYS[0], current);
     }
-  } catch {}
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(state)
+    );
+
+    // New cloud backup
+    if (window.db) {
+      await window.addDoc(
+        window.collection(window.db, "backups"),
+        {
+          savedAt: new Date().toISOString(),
+          users: state.users,
+          entries: state.entries,
+          branchReports: state.branchReports,
+          auditLogs: state.auditLogs
+        }
+      );
+
+      console.log("Saved to Firestore");
+    }
+
+  } catch (err) {
+    console.error(
+      "Save failed:",
+      err
+    );
+  }
 }
 
 function backupSnapshots() {
