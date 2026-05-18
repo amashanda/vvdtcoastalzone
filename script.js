@@ -364,6 +364,10 @@ function statusClass(status) {
   return String(status).toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }
 
+function escapeHtml(str) {
+  return String(str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 function render() {
   const user = activeUser();
   ensureAllowedView(user);
@@ -399,8 +403,9 @@ function authScreen() {
 function loginForm() {
   return `
     <form class="auth-form" id="loginForm">
-      <label>Phone Number <input name="phone" inputmode="tel" value="255700000001" required /></label>
-      <label>Password <input name="password" type="password" value="Admin@2026" required /></label>
+      <label>Phone Number <input name="phone" inputmode="tel" placeholder="255700XXXXXX" required autocomplete="username" /></label>
+      <label>Password <input name="password" type="password" placeholder="Your password" required autocomplete="current-password" /></label>
+      <p id="loginError" class="danger-note" style="display:none"></p>
       <button class="primary-action" type="submit">Login to VVDT</button>
       <p class="form-note">Use your registered staff phone number and password.</p>
     </form>
@@ -410,8 +415,8 @@ function loginForm() {
 function signupForm() {
   return `
     <form class="auth-form" id="signupForm">
-      <label>Full Name <input name="name" value="New Coastal Staff" required /></label>
-      <label>Phone Number <input name="phone" inputmode="tel" value="255700100100" required /></label>
+      <label>Full Name <input name="name" placeholder="Full name" required autocomplete="name" /></label>
+      <label>Phone Number <input name="phone" inputmode="tel" placeholder="255700XXXXXX" required autocomplete="username" /></label>
       <label>Staff Profile
         <select name="profile">
           ${["MBB", "RO", "MCE", "TL", "Premier RM", "SSO", "Freelancer", "Digital Champion"].map((profile) => `<option>${profile}</option>`).join("")}
@@ -540,8 +545,12 @@ function staffDashboard(user) {
         <div class="leaderboard">${progressRows.map((row) => progressRow(row)).join("")}</div>
       </article>
       <article class="panel">
-        <div class="panel-heading"><div><span class="eyebrow">Latest record</span><h3>Status</h3></div></div>
-        ${latest ? `<div class="attention-list"><div><b>${latest.status}</b><span>${latest.date} · ${latest.comment || "No comment"}</span></div></div>` : `<p class="empty-state">No entries submitted yet.</p>`}
+        <div class="panel-heading"><div><span class="eyebrow">My submissions</span><h3>Submission Status</h3></div></div>
+        ${entries.length ? `<div class="submission-feed">${entries.slice(0, 8).map((entry) => `
+          <div class="submission-feed-item">
+            <div class="feed-row"><span class="badge ${statusClass(entry.status)}">${escapeHtml(entry.status)}</span><small>${entry.date}</small></div>
+            <div class="feed-comment">${escapeHtml(entry.comment || "No comment")}</div>
+          </div>`).join("")}</div>` : `<p class="empty-state">No entries submitted yet.</p>`}
       </article>
     </section>
   `;
@@ -601,12 +610,17 @@ function adminDashboard(user) {
 }
 
 function progressRow(row) {
+  const pct = row.pct;
+  const colorClass = pct >= 100 ? "bar-gold" : pct >= 80 ? "bar-green" : pct >= 50 ? "bar-orange" : "bar-red";
   return `
     <div class="leaderboard-row">
-      <span class="rank">${Math.round(row.pct)}%</span>
-      <div><b>${row.kpi.name}</b><small>${row.actual.toLocaleString()} of ${row.target.toLocaleString()} ${row.kpi.unit}</small></div>
-      <div class="meter"><i style="width:${Math.min(row.pct, 100)}%"></i></div>
-      <span class="score">${row.kpi.frequency}</span>
+      <span class="rank pct-label ${colorClass}">${Math.round(pct)}%</span>
+      <div>
+        <b>${escapeHtml(row.kpi.name)}</b>
+        <small><strong>${row.actual.toLocaleString()}</strong> / ${row.target.toLocaleString()} ${escapeHtml(row.kpi.unit)}</small>
+      </div>
+      <div class="meter"><i class="${colorClass}" style="width:${Math.min(pct, 100)}%"></i></div>
+      <span class="score">${escapeHtml(row.kpi.frequency)}</span>
     </div>
   `;
 }
@@ -993,12 +1007,16 @@ function adminView(user) {
         ${branchManagementPanel()}
       </div>
     `,
-    kpi: `
+    kpi: (() => {
+      const totalNow = state.kpis.reduce((s, k) => s + k.weight, 0);
+      const overClass = totalNow > 100 ? "weight-over" : totalNow === 100 ? "weight-perfect" : "weight-under";
+      return `
       <div class="admin-panel-block">
-        <div class="panel-heading"><div><span class="eyebrow">Scoring</span><h3>KPI Weights</h3></div></div>
-        <form id="kpiWeightForm" class="weight-list">${state.kpis.map((kpi) => `<label class="weight-row"><b>${kpi.name}</b><input name="weight-${kpi.id}" type="number" min="0" max="100" value="${kpi.weight}" /><span>%</span></label>`).join("")}<button class="secondary-action" type="submit">Save Weights</button></form>
-      </div>
-    `,
+        <div class="panel-heading"><div><span class="eyebrow">Scoring</span><h3>KPI Weights</h3></div><output id="weightTotal" class="weight-total-display ${overClass}">${totalNow}% total</output></div>
+        <p id="weightOverError" class="danger-note" style="display:${totalNow > 100 ? "block" : "none"}">Total weight is ${totalNow}% — must not exceed 100%. Reduce some values before saving.</p>
+        <form id="kpiWeightForm" class="weight-list">${state.kpis.map((kpi) => `<label class="weight-row"><b>${escapeHtml(kpi.name)}</b><input name="weight-${kpi.id}" type="number" min="0" max="100" value="${kpi.weight}" /><span>%</span></label>`).join("")}<button class="secondary-action" type="submit">Save Weights</button></form>
+      </div>`;
+    })(),
     system: `
       <div class="admin-panel-block">${backupPanel()}</div>
       <div class="admin-panel-block">${demoAccessPanel()}</div>
@@ -1143,6 +1161,55 @@ function backupPanel() {
   `;
 }
 
+function showSuccessModal(title, message) {
+  const existing = document.querySelector(".vvdt-success-overlay");
+  if (existing) existing.remove();
+  const el = document.createElement("div");
+  el.className = "vvdt-success-overlay";
+  el.innerHTML = `
+    <div class="vvdt-success-card">
+      <div class="vvdt-success-tick">&#10003;</div>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(message)}</p>
+      <button class="primary-action" id="vvdtSuccessClose">OK</button>
+    </div>
+  `;
+  document.body.appendChild(el);
+  const close = () => el.remove();
+  document.querySelector("#vvdtSuccessClose")?.addEventListener("click", close);
+  setTimeout(close, 6000);
+}
+
+function showCommentModal(title, placeholder, required, onConfirm) {
+  const existing = document.querySelector(".vvdt-comment-overlay");
+  if (existing) existing.remove();
+  const el = document.createElement("div");
+  el.className = "vvdt-comment-overlay";
+  el.innerHTML = `
+    <div class="vvdt-success-card">
+      <h3>${escapeHtml(title)}</h3>
+      <textarea id="vvdtCommentInput" placeholder="${escapeHtml(placeholder)}" rows="3" style="width:100%;margin:12px 0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;resize:vertical"></textarea>
+      <p id="vvdtCommentError" class="danger-note" style="display:none">A comment is required for this action.</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+        <button class="secondary-action" id="vvdtCommentCancel">Cancel</button>
+        <button class="primary-action" id="vvdtCommentConfirm">Confirm</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(el);
+  document.querySelector("#vvdtCommentCancel")?.addEventListener("click", () => el.remove());
+  document.querySelector("#vvdtCommentConfirm")?.addEventListener("click", () => {
+    const comment = (document.querySelector("#vvdtCommentInput")?.value || "").trim();
+    if (required && !comment) {
+      const errEl = document.querySelector("#vvdtCommentError");
+      if (errEl) errEl.style.display = "block";
+      return;
+    }
+    el.remove();
+    onConfirm(comment);
+  });
+}
+
 function bindEvents() {
   document.querySelector("#changePasswordForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1182,7 +1249,11 @@ function bindEvents() {
     const form = new FormData(event.currentTarget);
     const phone = normalizePhone(form.get("phone"));
     const user = state.users.find((item) => normalizePhone(item.phone) === phone && item.password === form.get("password") && item.active);
-    if (!user) return alert("Invalid phone number, password, or inactive user.");
+    if (!user) {
+      const errEl = document.querySelector("#loginError");
+      if (errEl) { errEl.textContent = "Incorrect phone number or password, or account is inactive."; errEl.style.display = "block"; }
+      return;
+    }
     state.activeUserId = user.id;
     state.activeView = "dashboard";
     state.generatedPassword = null;
@@ -1253,6 +1324,7 @@ function bindEvents() {
     addAudit("Performance submitted", `Entry ${entry.id}`, entry.comment);
     saveState();
     render();
+    showSuccessModal("Entry submitted for validation", "Your KPI entry has been submitted and is now awaiting BQA review.");
   });
 
   document.querySelectorAll("[data-entry-status]").forEach((button) => {
@@ -1337,10 +1409,33 @@ function bindEvents() {
   document.querySelector("#kpiWeightForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    state.kpis = state.kpis.map((kpi) => ({ ...kpi, weight: Number(form.get(`weight-${kpi.id}`) || kpi.weight) }));
+    const newWeights = state.kpis.map((kpi) => Number(form.get(`weight-${kpi.id}`) || kpi.weight));
+    const total = newWeights.reduce((s, w) => s + w, 0);
+    if (total > 100) {
+      const errEl = document.querySelector("#weightOverError");
+      if (errEl) { errEl.textContent = `Total weight is ${total}% — must not exceed 100%.`; errEl.style.display = "block"; }
+      return;
+    }
+    state.kpis = state.kpis.map((kpi, i) => ({ ...kpi, weight: newWeights[i] }));
     addAudit("KPI weights updated", "Scoring engine");
     saveState();
     render();
+  });
+
+  document.querySelectorAll("#kpiWeightForm input[type='number']").forEach((input) => {
+    input.addEventListener("input", () => {
+      const total = Array.from(document.querySelectorAll("#kpiWeightForm input[type='number']")).reduce((s, el) => s + Number(el.value || 0), 0);
+      const output = document.querySelector("#weightTotal");
+      const errEl = document.querySelector("#weightOverError");
+      if (output) {
+        output.textContent = `${total}% total`;
+        output.className = `weight-total-display ${total > 100 ? "weight-over" : total === 100 ? "weight-perfect" : "weight-under"}`;
+      }
+      if (errEl) {
+        errEl.style.display = total > 100 ? "block" : "none";
+        if (total > 100) errEl.textContent = `Total weight is ${total}% — must not exceed 100%.`;
+      }
+    });
   });
 
   const roleSelect = document.querySelector("#adminRoleSelect");
@@ -1497,55 +1592,74 @@ function createUser(form, forcedRole) {
 
 function updateEntryStatus(id, status) {
   const requiresComment = ["Returned with Comments", "Rejected"].includes(status);
-  const comment = requiresComment ? prompt(`Comment required for: ${status}`) : prompt(`Optional comment for: ${status}`, "");
-  if (requiresComment && !String(comment || "").trim()) return alert("Comment is required.");
-  state.entries = state.entries.map((entry) => {
-    if (entry.id !== id) return entry;
-    const history = [...(entry.history || []), { actor: activeUser()?.name, status, comment: comment || "", time: nowLabel() }];
-    return { ...entry, status, comment: comment || `${status} by ${activeUser()?.name}`, history };
-  });
-  addAudit(`Entry ${status}`, `Entry ${id}`, comment || "");
-  saveState();
-  render();
+  const labels = { "BQA Approved": "Approve Entry", "Returned with Comments": "Return with Comments", "Rejected": "Reject Entry" };
+  const successMessages = { "BQA Approved": "Entry approved and ready for branch consolidation.", "Returned with Comments": "Entry returned to staff with your comment.", "Rejected": "Entry has been rejected." };
+  showCommentModal(
+    labels[status] || status,
+    requiresComment ? "Reason is required — staff will see this comment" : "Optional comment for this action",
+    requiresComment,
+    (comment) => {
+      state.entries = state.entries.map((entry) => {
+        if (entry.id !== id) return entry;
+        const history = [...(entry.history || []), { actor: activeUser()?.name, status, comment: comment || "", time: nowLabel() }];
+        return { ...entry, status, comment: comment || `${status} by ${activeUser()?.name}`, history };
+      });
+      addAudit(`Entry ${status}`, `Entry ${id}`, comment || "");
+      saveState();
+      render();
+      showSuccessModal(labels[status] || status, successMessages[status] || `Entry marked as "${status}".`);
+    }
+  );
 }
 
 function createBranchReport() {
   const user = activeUser();
   const approved = consolidatableEntries(user.branchId);
-  if (!approved.length) return alert("No BQA-approved entries are ready for BM submission.");
-  const comment = prompt("BQA comment for BM consolidated report:");
-  if (!String(comment || "").trim()) return alert("Comment is required.");
-  const report = {
-    id: Date.now(),
-    branchId: user.branchId,
-    date: "2026-05-18",
-    entryIds: approved.map((entry) => entry.id),
-    status: "Submitted to BM",
-    bqaComment: comment,
-    bmComment: "",
-    submittedBy: user.id,
-    reviewedBy: null,
-    createdAt: nowLabel(),
-    updatedAt: nowLabel()
-  };
-  state.branchReports.unshift(report);
-  state.entries = state.entries.map((entry) => approved.some((item) => item.id === entry.id) ? { ...entry, status: "Submitted to BM" } : entry);
-  addAudit("Branch report submitted to BM", branchName(user.branchId), comment);
-  saveState();
-  render();
+  if (!approved.length) return showSuccessModal("Nothing to submit", "No BQA-approved entries are ready for BM submission. Approve entries first.");
+  showCommentModal("Submit Branch Report to BM", "BQA summary comment for the consolidated report (required)", true, (comment) => {
+    const report = {
+      id: Date.now(),
+      branchId: user.branchId,
+      date: "2026-05-18",
+      entryIds: approved.map((entry) => entry.id),
+      status: "Submitted to BM",
+      bqaComment: comment,
+      bmComment: "",
+      submittedBy: user.id,
+      reviewedBy: null,
+      createdAt: nowLabel(),
+      updatedAt: nowLabel()
+    };
+    state.branchReports.unshift(report);
+    state.entries = state.entries.map((entry) => approved.some((item) => item.id === entry.id) ? { ...entry, status: "Submitted to BM" } : entry);
+    addAudit("Branch report submitted to BM", branchName(user.branchId), comment);
+    saveState();
+    render();
+    showSuccessModal("Branch report submitted", `${approved.length} approved ${approved.length === 1 ? "entry" : "entries"} from ${branchName(user.branchId)} submitted to BM for review.`);
+  });
 }
 
 function updateReportStatus(id, status) {
-  const comment = prompt(`BM comment for: ${status}`);
-  if (status === "BM Returned" && !String(comment || "").trim()) return alert("Comment is required.");
-  state.branchReports = state.branchReports.map((report) => report.id === id ? { ...report, status, bmComment: comment || status, reviewedBy: activeUser()?.id, updatedAt: nowLabel() } : report);
-  const report = state.branchReports.find((item) => item.id === id);
-  if (report) {
-    state.entries = state.entries.map((entry) => report.entryIds.includes(entry.id) ? { ...entry, status } : entry);
-    addAudit(`Branch report ${status}`, branchName(report.branchId), comment || "");
-  }
-  saveState();
-  render();
+  const isReturn = status === "BM Returned";
+  showCommentModal(
+    isReturn ? "Return Branch Report" : "Approve Branch Report",
+    isReturn ? "Reason for returning (required — BQA will see this)" : "Approval comment (optional)",
+    isReturn,
+    (comment) => {
+      state.branchReports = state.branchReports.map((report) => report.id === id ? { ...report, status, bmComment: comment || status, reviewedBy: activeUser()?.id, updatedAt: nowLabel() } : report);
+      const report = state.branchReports.find((item) => item.id === id);
+      if (report) {
+        state.entries = state.entries.map((entry) => report.entryIds.includes(entry.id) ? { ...entry, status } : entry);
+        addAudit(`Branch report ${status}`, branchName(report.branchId), comment || "");
+      }
+      saveState();
+      render();
+      showSuccessModal(
+        isReturn ? "Report returned to BQA" : "Branch report approved",
+        isReturn ? "The branch report has been returned to BQA with your comment." : `Branch report for ${report ? branchName(report.branchId) : "branch"} has been approved.`
+      );
+    }
+  );
 }
 
 render();
