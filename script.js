@@ -136,7 +136,7 @@ const baseState = {
 
 let state = loadState();
 
-fasync function loadState() {
+async function loadState() {
   try {
     if (window.db) {
       const q = window.query(
