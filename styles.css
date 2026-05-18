@@ -1000,4 +1000,151 @@ td small {
   .span-2 { grid-column: auto; }
   .auth-hero { min-height: 260px; }
   .auth-page { grid-template-columns: 1fr; }
+  .admin-layout { flex-direction: column; }
+  .admin-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding-bottom: 8px; gap: 6px; }
+  .admin-nav-btn { flex-direction: row; gap: 6px; min-width: max-content; padding: 10px 14px; }
+  .action-cell { display: flex; flex-wrap: wrap; gap: 4px; }
+}
+
+/* ── Password change overlay ─────────────────────── */
+.pw-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 55, 5, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.pw-card {
+  width: min(440px, 94vw);
+  padding: 36px 32px;
+  border-radius: 14px;
+  background: var(--white);
+  box-shadow: 0 24px 80px rgba(0,0,0,0.22);
+  text-align: center;
+}
+
+.pw-logo {
+  width: 70px;
+  height: 70px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: var(--mist-green);
+  padding: 8px;
+  margin-bottom: 16px;
+}
+
+.pw-card h2 { margin: 0 0 8px; font-size: 1.5rem; }
+.pw-card .body-copy { margin-bottom: 20px; }
+.pw-card .auth-form { text-align: left; }
+
+/* ── Danger / info notes ─────────────────────────── */
+.danger-note {
+  border: 1px solid #f5c0c0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--danger);
+  color: #9a1b1b;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.muted-text { color: var(--muted); font-size: 0.82rem; }
+
+/* ── Admin layout (left nav + content) ───────────── */
+.admin-layout {
+  display: flex;
+  gap: 0;
+  min-height: 600px;
+}
+
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 170px;
+  max-width: 200px;
+  padding: 6px 8px;
+  border-right: 1px solid var(--line);
+  background: var(--mist-green);
+  border-radius: 10px 0 0 10px;
+  flex-shrink: 0;
+}
+
+.admin-nav-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s;
+}
+
+.admin-nav-btn:hover { background: rgba(10,119,8,0.1); color: var(--ink); }
+.admin-nav-btn.active { background: var(--deep-green); color: var(--white); }
+.admin-nav-icon { font-size: 1.3rem; line-height: 1; }
+.admin-nav-label { white-space: nowrap; }
+
+.admin-content {
+  flex: 1;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 10px 10px 0;
+  background: var(--white);
+}
+
+.admin-panel-block {
+  margin-bottom: 28px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-panel-block:last-child { border-bottom: 0; margin-bottom: 0; }
+
+/* ── Leaderboard table ───────────────────────────── */
+.leaderboard-table td, .export-table td { vertical-align: middle; }
+
+.rank-badge {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 0.78rem;
+  font-weight: 900;
+  background: var(--mist-green);
+  color: var(--deep-green);
+}
+
+.rank-badge.gold   { background: #fff3cd; color: #856404; }
+.rank-badge.silver { background: #e9ecef; color: #495057; }
+.rank-badge.bronze { background: #ffe5cc; color: #7a3c00; }
+
+.row-best td  { background: #f0fdf0; }
+.row-worst td { background: #fff5f5; color: #7a1b1b; }
+.row-disabled td { opacity: 0.55; }
+
+/* ── Action cell in tables ───────────────────────── */
+.action-cell { white-space: nowrap; }
+.action-cell .mini-action { margin: 2px; }
+
+/* ── Print tweaks ────────────────────────────────── */
+@media print {
+  .admin-layout,
+  .admin-nav,
+  .pw-overlay { display: none !important; }
 }

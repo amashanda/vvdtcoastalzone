@@ -104,19 +104,20 @@ const baseState = {
   authMode: "login",
   reportPeriod: "Daily",
   editingBranchId: null,
+  adminSection: "users",
   roleCatalog: structuredClone(defaultRoleCatalog),
   rolePermissions: structuredClone(defaultRolePermissions),
   branches,
   kpis,
   users: [
-    { id: 1, staffNo: "ADM001", name: "System Administrator", phone: "255700000001", password: "Admin@2026", role: "Admin", profile: "TL", branchId: "3330", active: true },
-    { id: 2, staffNo: "STF001", name: "Asha Omar", phone: "255700000002", password: "Staff@2026", role: "Staff", profile: "RO", branchId: "3369", active: true },
-    { id: 3, staffNo: "BQA001", name: "Juma Hassan", phone: "255700000003", password: "Bqa@2026", role: "BQA", profile: "TL", branchId: "3330", active: true },
-    { id: 4, staffNo: "BM001", name: "Neema Ali", phone: "255700000004", password: "Bm@2026", role: "BM", profile: "TL", branchId: "3330", active: true },
-    { id: 5, staffNo: "ZBM001", name: "Hassan Said", phone: "255700000005", password: "Zbm@2026", role: "ZBM", profile: "TL", branchId: "4282", active: true },
-    { id: 6, staffNo: "ZM001", name: "Fatma Mwinyi", phone: "255700000006", password: "Zm@2026", role: "ZM", profile: "TL", branchId: "3330", active: true },
-    { id: 7, staffNo: "DC001", name: "Rehema Kito", phone: "255700000007", password: "Dc@2026", role: "Staff", profile: "Digital Champion", branchId: "3330", active: true },
-    { id: 8, staffNo: "STF002", name: "Baraka Saleh", phone: "255700000008", password: "Staff2@2026", role: "Staff", profile: "MBB", branchId: "3330", active: true }
+    { id: 1, staffNo: "ADM001", name: "System Administrator", phone: "255700000001", password: "Admin@2026", role: "Admin", profile: "TL", branchId: "3330", active: true, mustChangePassword: false },
+    { id: 2, staffNo: "STF001", name: "Asha Omar", phone: "255700000002", password: "Staff@2026", role: "Staff", profile: "RO", branchId: "3369", active: true, mustChangePassword: false },
+    { id: 3, staffNo: "BQA001", name: "Juma Hassan", phone: "255700000003", password: "Bqa@2026", role: "BQA", profile: "TL", branchId: "3330", active: true, mustChangePassword: false },
+    { id: 4, staffNo: "BM001", name: "Neema Ali", phone: "255700000004", password: "Bm@2026", role: "BM", profile: "TL", branchId: "3330", active: true, mustChangePassword: false },
+    { id: 5, staffNo: "ZBM001", name: "Hassan Said", phone: "255700000005", password: "Zbm@2026", role: "ZBM", profile: "ZBM", branchId: "zonal", active: true, mustChangePassword: false },
+    { id: 6, staffNo: "ZM001", name: "Fatma Mwinyi", phone: "255700000006", password: "Zm@2026", role: "ZM", profile: "ZM", branchId: "zonal", active: true, mustChangePassword: false },
+    { id: 7, staffNo: "DC001", name: "Rehema Kito", phone: "255700000007", password: "Dc@2026", role: "Staff", profile: "Digital Champion", branchId: "3330", active: true, mustChangePassword: false },
+    { id: 8, staffNo: "STF002", name: "Baraka Saleh", phone: "255700000008", password: "Staff2@2026", role: "Staff", profile: "MBB", branchId: "3330", active: true, mustChangePassword: false }
   ],
   entries: [
     { id: 1, userId: 2, branchId: "3369", date: "2026-05-18", values: { 1: 3, 2: 160000, 3: 1, 4: 2, 5: 1, 6: 1, 7: 1, 8: 1 }, status: "BQA Approved", comment: "Evidence reviewed and accepted.", history: [], createdAt: "2026-05-18 09:22" },
@@ -206,9 +207,12 @@ function nowLabel() {
 }
 
 function createRandomPassword() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-  const suffix = Array.from({ length: 8 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
-  return `VVDT-${suffix}`;
+  const chars = "abcdefghjkmnpqrstuvwxyz23456789";
+  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+}
+
+function isSimplePasswordValid(pw) {
+  return String(pw || "").trim().length >= 6;
 }
 
 function activeUser() {
@@ -418,10 +422,29 @@ function signupForm() {
           ${state.branches.map((branch) => `<option value="${branch.id}">${branch.code} · ${branch.name}</option>`).join("")}
         </select>
       </label>
+      <p id="signupError" class="danger-note" style="display:none"></p>
       <button class="primary-action" type="submit">Create Staff Account</button>
-      ${state.generatedPassword ? `<p class="success-note">Generated default password: <strong>${state.generatedPassword.password}</strong> for ${state.generatedPassword.phone}</p>` : ""}
-      <p class="form-note">A random default password is generated after signup. Admin can later upgrade role, profile, or branch.</p>
+      ${state.generatedPassword ? `<p class="success-note">Account created — share this temporary password with the user: <strong>${state.generatedPassword.password}</strong>. They will be prompted to change it on first login.</p>` : ""}
+      <p class="form-note">A temporary password is generated after signup. The user must change it on first login.</p>
     </form>
+  `;
+}
+
+function passwordChangeOverlay(user) {
+  return `
+    <div class="pw-overlay" id="pwOverlay">
+      <div class="pw-card">
+        <img src="CRDB logo.png" alt="CRDB" class="pw-logo" />
+        <h2>Welcome, ${user.name.split(" ")[0]}</h2>
+        <p class="body-copy">Please set a new personal password before you continue. Minimum 6 characters — keep it something you remember easily.</p>
+        <form class="auth-form" id="changePasswordForm">
+          <label>New Password <input name="newPw" type="password" minlength="6" placeholder="At least 6 characters" required autocomplete="new-password" /></label>
+          <label>Confirm Password <input name="confirmPw" type="password" minlength="6" placeholder="Repeat your password" required autocomplete="new-password" /></label>
+          <button class="primary-action" type="submit">Set Password &amp; Continue</button>
+          <p id="pwError" class="danger-note" style="display:none"></p>
+        </form>
+      </div>
+    </div>
   `;
 }
 
@@ -429,6 +452,7 @@ function appShell(user) {
   const roleEntry = (state.roleCatalog || defaultRoleCatalog).find((r) => r.key === user.role);
   const roleTypeBadge = roleEntry ? `<span class="role-type-badge ${roleEntry.type.toLowerCase()}" style="margin-left:0">${roleEntry.type}</span>` : "";
   return `
+    ${user.mustChangePassword ? passwordChangeOverlay(user) : ""}
     <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Menu">&#9776;</button>
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
     <div class="app-shell">
@@ -691,36 +715,145 @@ function branchReportsTable(reports, showActions) {
   `;
 }
 
+function branchLeaderboard(entries) {
+  const groups = {};
+  entries.forEach((e) => { if (!groups[e.branchId]) groups[e.branchId] = []; groups[e.branchId].push(e); });
+  const ranked = Object.entries(groups)
+    .map(([branchId, es]) => ({ branchId, count: es.length, score: averageScore(es) }))
+    .sort((a, b) => b.count - a.count || b.score - a.score);
+  if (!ranked.length) return `<p class="empty-state">No branch data for this period.</p>`;
+  return `
+    <div class="table-wrap">
+      <table class="leaderboard-table">
+        <thead><tr><th>#</th><th>Branch</th><th>Submissions</th><th>Avg Score</th><th></th></tr></thead>
+        <tbody>
+          ${ranked.map((r, i) => `<tr class="${i === 0 ? "row-best" : i === ranked.length - 1 && ranked.length > 1 ? "row-worst" : ""}">
+            <td><span class="rank-badge ${i === 0 ? "gold" : i === 1 ? "silver" : i === 2 ? "bronze" : ""}">${i + 1}</span></td>
+            <td><b>${branchName(r.branchId)}</b></td>
+            <td>${r.count}</td>
+            <td>${r.score.toFixed(1)}%</td>
+            <td>${i === 0 ? '<span class="badge bqa-approved">Leading</span>' : i === ranked.length - 1 && ranked.length > 1 ? '<span class="badge rejected">Low Activity</span>' : ''}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function staffLeaderboard(entries) {
+  const groups = {};
+  entries.forEach((e) => { if (!groups[e.userId]) groups[e.userId] = []; groups[e.userId].push(e); });
+  const ranked = Object.entries(groups)
+    .map(([userId, es]) => {
+      const u = state.users.find((x) => x.id === Number(userId));
+      return { user: u, count: es.length, score: averageScore(es) };
+    })
+    .filter((r) => r.user)
+    .sort((a, b) => b.score - a.score || b.count - a.count);
+  if (!ranked.length) return `<p class="empty-state">No staff data for this period.</p>`;
+  return `
+    <div class="table-wrap">
+      <table class="leaderboard-table">
+        <thead><tr><th>#</th><th>Staff</th><th>Profile</th><th>Branch</th><th>Entries</th><th>Score</th><th></th></tr></thead>
+        <tbody>
+          ${ranked.map((r, i) => `<tr class="${i === 0 ? "row-best" : i === ranked.length - 1 && ranked.length > 1 ? "row-worst" : ""}">
+            <td><span class="rank-badge ${i === 0 ? "gold" : i === 1 ? "silver" : i === 2 ? "bronze" : ""}">${i + 1}</span></td>
+            <td><b>${r.user.name}</b></td>
+            <td><small>${r.user.profile}</small></td>
+            <td><small>${branchName(r.user.branchId)}</small></td>
+            <td>${r.count}</td>
+            <td>${r.score.toFixed(1)}%</td>
+            <td>${i === 0 ? '<span class="badge bqa-approved">Top</span>' : i === ranked.length - 1 && ranked.length > 1 ? '<span class="badge rejected">Attention</span>' : ''}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
 function reportsView(user) {
   const entries = periodEntries(entriesVisibleTo(user));
   const kpiRows = summarizeKpis(entries);
   const top = kpiRows[0];
   const under = kpiRows.find((row) => row.actual < row.kpi.target);
+  const showLeaderboards = isSuperRole(user.role) || isZonalRole(user.role);
+  const periodLabel = `${state.reportPeriod} Report — ${new Date().toLocaleDateString("en-GB")}`;
   return `
     <section class="panel" id="reportsPrintArea">
       <div class="panel-heading">
-        <div><span class="eyebrow">Reporting</span><h3>${state.reportPeriod} Performance Summary</h3></div>
+        <div><span class="eyebrow">CRDB Bank · Coastal Zone</span><h3>${periodLabel}</h3></div>
         <div class="report-toolbar">
-          <div class="segmented">${["Daily", "Weekly", "Monthly", "Quarterly"].map((period) => `<button class="${state.reportPeriod === period ? "active" : ""}" data-report-period="${period}" type="button">${period}</button>`).join("")}</div>
+          <div class="segmented">${["Daily", "Weekly", "Monthly", "Quarterly"].map((p) => `<button class="${state.reportPeriod === p ? "active" : ""}" data-report-period="${p}" type="button">${p}</button>`).join("")}</div>
           <div class="export-btns">
-            <button class="mini-action" data-export="csv" type="button">CSV</button>
-            <button class="mini-action" data-export="xls" type="button">XLS</button>
-            <button class="mini-action" data-export="pdf" type="button">PDF</button>
+            <button class="mini-action" data-export="csv" type="button">⬇ CSV</button>
+            <button class="mini-action" data-export="xls" type="button">⬇ XLS</button>
+            <button class="mini-action" data-export="pdf" type="button">🖨 PDF</button>
           </div>
         </div>
       </div>
+
       <section class="metric-grid">
-        ${metricCard("Total Entries", entries.length, `${state.reportPeriod} view`, Math.min(entries.length * 25, 100))}
-        ${metricCard("Average Score", `${averageScore(entries).toFixed(1)}%`, performanceCategory(averageScore(entries)), averageScore(entries))}
-        ${metricCard("Top KPI", top?.kpi.name || "None", top ? top.actual.toLocaleString() : "No data", 80)}
-        ${metricCard("Under Target", under?.kpi.name || "None", under ? `${under.actual} captured` : "No gap", under ? 45 : 100)}
+        ${metricCard("Total Entries", entries.length, `${state.reportPeriod} period`, Math.min(entries.length * 25, 100))}
+        ${metricCard("Zone Average Score", `${averageScore(entries).toFixed(1)}%`, performanceCategory(averageScore(entries)), averageScore(entries))}
+        ${metricCard("Top KPI", top?.kpi.name || "—", top ? `${top.actual.toLocaleString()} captured` : "No data", 80)}
+        ${metricCard("Below Target", under?.kpi.name || "—", under ? `${under.actual} captured` : "All on track", under ? 35 : 100)}
       </section>
+
+      ${showLeaderboards ? `
+        <div class="content-grid">
+          <article class="panel flat">
+            <div class="panel-heading"><div><span class="eyebrow">Branch Ranking</span><h3>Branch Leaderboard</h3></div></div>
+            ${branchLeaderboard(entries)}
+          </article>
+          <article class="panel flat">
+            <div class="panel-heading"><div><span class="eyebrow">Staff Ranking</span><h3>Top Staff</h3></div></div>
+            ${staffLeaderboard(entries)}
+          </article>
+        </div>
+      ` : ""}
+
       <div class="content-grid">
-        <article class="panel flat"><div class="panel-heading"><div><span class="eyebrow">Status</span><h3>Validation Breakdown</h3></div></div><div class="attention-list">${Object.entries(statusCounts(entries)).map(([status, count]) => `<div><b>${count}</b><span>${status}</span></div>`).join("") || `<p class="empty-state">No status data.</p>`}</div></article>
-        <article class="panel flat wide"><div class="panel-heading"><div><span class="eyebrow">Records</span><h3>Relevant Rows</h3></div></div>${entriesTable(entries, false)}</article>
+        <article class="panel flat">
+          <div class="panel-heading"><div><span class="eyebrow">Status Breakdown</span><h3>Validation Summary</h3></div></div>
+          <div class="attention-list">${Object.entries(statusCounts(entries)).map(([status, count]) => `<div><b>${count}</b><span>${status}</span></div>`).join("") || `<p class="empty-state">No status data.</p>`}</div>
+        </article>
+        <article class="panel flat wide">
+          <div class="panel-heading"><div><span class="eyebrow">All Records</span><h3>Entry Details</h3></div></div>
+          ${exportReadyTable(entries)}
+        </article>
       </div>
     </section>
   `;
+}
+
+function exportReadyTable(entries) {
+  if (!entries.length) return `<p class="empty-state">No entries for this period.</p>`;
+  return `
+    <div class="table-wrap">
+      <table class="export-table">
+        <thead>
+          <tr>
+            <th>Date</th><th>Staff Name</th><th>Profile</th><th>Branch</th>
+            <th>Status</th><th>Score (%)</th><th>Category</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${entries.map((entry) => {
+            const u = state.users.find((x) => x.id === entry.userId);
+            const sc = scoreEntry(entry);
+            const cat = sc.category;
+            const rowClass = sc.finalIndex >= 90 ? "row-best" : sc.finalIndex < 60 ? "row-worst" : "";
+            return `<tr class="${rowClass}">
+              <td>${entry.date}</td>
+              <td><b>${u?.name || "—"}</b></td>
+              <td>${u?.profile || "—"}</td>
+              <td>${branchName(entry.branchId)}</td>
+              <td><span class="badge ${statusClass(entry.status)}">${entry.status}</span></td>
+              <td><b>${sc.finalIndex.toFixed(1)}</b></td>
+              <td>${cat}</td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 function downloadFile(content, filename, mime) {
@@ -734,25 +867,28 @@ function downloadFile(content, filename, mime) {
 }
 
 function exportCSV(entries) {
-  const header = ["Date", "Staff", "Profile", "Branch", "Status", "Score (%)"];
+  const cols = ["Date", "Staff Name", "Staff No", "Profile", "Branch", "Status", "Score (%)", "Category"];
   const rows = entries.map((entry) => {
-    const user = state.users.find((u) => u.id === entry.userId);
-    const score = scoreEntry(entry).finalIndex.toFixed(1);
-    return [entry.date, user?.name || "", user?.profile || "", branchName(entry.branchId), entry.status, score];
+    const u = state.users.find((x) => x.id === entry.userId);
+    const sc = scoreEntry(entry);
+    return [entry.date, u?.name||"", u?.staffNo||"", u?.profile||"", branchName(entry.branchId), entry.status, sc.finalIndex.toFixed(1), sc.category];
   });
-  const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
-  downloadFile(csv, `VVDT-${state.reportPeriod}-Report.csv`, "text/csv;charset=utf-8;");
+  const csv = [cols, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  downloadFile(`CRDB VVDT - Coastal Zone - ${state.reportPeriod} Report\r\nExported: ${new Date().toLocaleDateString("en-GB")}\r\n\r\n${csv}`, `VVDT-${state.reportPeriod}-${new Date().toISOString().slice(0,10)}.csv`, "text/csv;charset=utf-8;");
 }
 
 function exportXLS(entries) {
-  const header = `<tr>${["Date","Staff","Profile","Branch","Status","Score (%)"].map((h) => `<th>${h}</th>`).join("")}</tr>`;
+  const cols = ["Date","Staff Name","Staff No","Profile","Branch","Status","Score (%)","Category"];
+  const header = `<tr style="background:#0a7708;color:#fff">${cols.map((h) => `<th>${h}</th>`).join("")}</tr>`;
   const rows = entries.map((entry) => {
-    const user = state.users.find((u) => u.id === entry.userId);
-    const score = scoreEntry(entry).finalIndex.toFixed(1);
-    return `<tr>${[entry.date, user?.name||"", user?.profile||"", branchName(entry.branchId), entry.status, score].map((c) => `<td>${c}</td>`).join("")}</tr>`;
+    const u = state.users.find((x) => x.id === entry.userId);
+    const sc = scoreEntry(entry);
+    const bg = sc.finalIndex >= 90 ? "#e0fde0" : sc.finalIndex < 60 ? "#ffe1e1" : "";
+    return `<tr style="background:${bg}">${[entry.date, u?.name||"", u?.staffNo||"", u?.profile||"", branchName(entry.branchId), entry.status, sc.finalIndex.toFixed(1), sc.category].map((c) => `<td>${c}</td>`).join("")}</tr>`;
   }).join("");
-  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body><table>${header}${rows}</table></body></html>`;
-  downloadFile(html, `VVDT-${state.reportPeriod}-Report.xls`, "application/vnd.ms-excel;charset=utf-8;");
+  const title = `<tr><td colspan="8" style="font-size:14pt;font-weight:bold;background:#0a7708;color:#fff">CRDB VVDT — Coastal Zone — ${state.reportPeriod} Report</td></tr><tr><td colspan="8">Exported: ${new Date().toLocaleDateString("en-GB")}</td></tr><tr></tr>`;
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body><table>${title}${header}${rows}</table></body></html>`;
+  downloadFile(html, `VVDT-${state.reportPeriod}-${new Date().toISOString().slice(0,10)}.xls`, "application/vnd.ms-excel;charset=utf-8;");
 }
 
 function exportPDF() {
@@ -763,56 +899,121 @@ function auditView() {
   return `<section class="panel"><div class="panel-heading"><div><span class="eyebrow">Admin only</span><h3>Audit Trail</h3></div></div><div class="timeline">${state.auditLogs.map((log) => `<div><b>${log.action}</b><span>${log.actor} · ${log.entity} · ${log.time}${log.note ? ` · ${log.note}` : ""}</span></div>`).join("")}</div></section>`;
 }
 
-function adminView(user) {
+function adminUserCreateForm() {
   const catalog = state.roleCatalog;
   const firstRole = catalog[0];
-  const firstIsZonal = firstRole?.type === "Zonal";
+  const firstIsZonal = firstRole?.type === "Zonal" || firstRole?.type === "Super";
   return `
-    <section class="content-grid">
-      <article class="panel wide">
-        <div class="panel-heading"><div><span class="eyebrow">User administration</span><h3>Create / Upgrade Users</h3></div></div>
-        <form class="entry-form" id="adminUserForm">
-          <label>Full Name <input name="name" value="New VVDT User" required /></label>
-          <label>Phone Number <input name="phone" inputmode="tel" value="255700${String(Date.now()).slice(-6)}" required /></label>
-          <label>Role
-            <select name="role" id="adminRoleSelect">
-              ${catalog.map((r) => `<option value="${r.key}" data-type="${r.type}">${r.label} — ${r.type === "Super" ? "Super (All Access)" : r.type === "Zonal" ? "Zonal Staff" : "Branch Staff"}</option>`).join("")}
-            </select>
-          </label>
-          <label>Profile
-            <select name="profile" id="adminProfileSelect">
-              <optgroup label="Branch Staff">
-                ${["MBB", "RO", "MCE", "TL", "Premier RM", "SSO", "Freelancer", "Digital Champion"].map((p) => `<option value="${p}">${p}</option>`).join("")}
-              </optgroup>
-              <optgroup label="Zonal Staff">
-                ${["ZM", "ZBM", "ZQA", "HRBP"].map((p) => `<option value="${p}">${p}</option>`).join("")}
-              </optgroup>
-            </select>
-          </label>
-          <div id="branchFieldWrap" ${firstIsZonal ? 'style="display:none"' : ""}>
-            <label>Branch
-              <select name="branchId">
-                ${state.branches.map((branch) => `<option value="${branch.id}">${branch.code} · ${branch.name}</option>`).join("")}
-              </select>
-            </label>
-          </div>
-          <p id="zonalRoleNote" class="form-note" style="display:${firstIsZonal ? "block" : "none"}">Zonal Staff roles are not assigned to a branch. They have zone-wide report visibility.</p>
-          <button class="primary-action" type="submit">Create User</button>
-        </form>
-        ${state.generatedPassword ? `<p class="success-note">Generated default password: <strong>${state.generatedPassword.password}</strong> for ${state.generatedPassword.phone}</p>` : ""}
-      </article>
-      <article class="panel">${accessControlPanel()}</article>
-    </section>
-    <section class="content-grid">
-      <article class="panel wide">${roleManagementPanel()}</article>
-      <article class="panel"><div class="panel-heading"><div><span class="eyebrow">KPI weights</span><h3>Scoring Setup</h3></div></div><form id="kpiWeightForm" class="weight-list">${state.kpis.map((kpi) => `<label class="weight-row"><b>${kpi.name}</b><input name="weight-${kpi.id}" type="number" min="0" max="100" value="${kpi.weight}" /><span>%</span></label>`).join("")}<button class="secondary-action" type="submit">Save Weights</button></form></article>
-    </section>
-    <section class="content-grid">
-      <article class="panel wide">${demoAccessPanel()}</article>
-    </section>
-    <section class="panel"><div class="panel-heading"><div><span class="eyebrow">Users</span><h3>Active Directory</h3></div></div><div class="user-grid">${state.users.map((item) => `<article class="user-card"><b>${item.name}</b><span>${item.role} · ${item.profile}</span><small>${item.phone} · ${branchName(item.branchId)}</small></article>`).join("")}</div></section>
-    <section class="panel"><div class="panel-heading"><div><span class="eyebrow">Branches</span><h3>Branch Directory</h3></div><span class="status-pill">${state.branches.length} branches · Sort code is unique ID</span></div>${branchManagementPanel()}</section>
-    ${backupPanel()}
+    <div class="panel-heading"><div><span class="eyebrow">Create User</span><h3>Add New Staff Member</h3></div></div>
+    <form class="entry-form" id="adminUserForm">
+      <label>Full Name <input name="name" placeholder="e.g. Amina Juma" required /></label>
+      <label>Phone Number <input name="phone" inputmode="tel" placeholder="255700XXXXXX" required /></label>
+      <label>Role
+        <select name="role" id="adminRoleSelect">
+          ${catalog.map((r) => `<option value="${r.key}" data-type="${r.type}">${r.label} — ${r.type === "Super" ? "Super (All Access)" : r.type === "Zonal" ? "Zonal Staff" : "Branch Staff"}</option>`).join("")}
+        </select>
+      </label>
+      <label>Profile
+        <select name="profile" id="adminProfileSelect">
+          <optgroup label="Branch Staff">
+            ${["MBB", "RO", "MCE", "TL", "Premier RM", "SSO", "Freelancer", "Digital Champion"].map((p) => `<option value="${p}">${p}</option>`).join("")}
+          </optgroup>
+          <optgroup label="Zonal Staff">
+            ${["ZM", "ZBM", "ZQA", "HRBP"].map((p) => `<option value="${p}">${p}</option>`).join("")}
+          </optgroup>
+        </select>
+      </label>
+      <div id="branchFieldWrap" ${firstIsZonal ? 'style="display:none"' : ""}>
+        <label>Branch
+          <select name="branchId">
+            ${state.branches.map((b) => `<option value="${b.id}">${b.code} · ${b.name}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      <p id="zonalRoleNote" class="form-note" style="display:${firstIsZonal ? "block" : "none"}">Zonal / Super roles are not assigned to a branch — they have zone-wide visibility.</p>
+      <p id="adminUserError" class="danger-note" style="display:none"></p>
+      <button class="primary-action" type="submit">Create User</button>
+    </form>
+    ${state.generatedPassword ? `<p class="success-note">Account created — temporary password: <strong>${state.generatedPassword.password}</strong> for ${state.generatedPassword.phone}. User will be prompted to change it on first login.</p>` : ""}
+  `;
+}
+
+function userManagementPanel() {
+  const me = activeUser();
+  return `
+    <div class="panel-heading"><div><span class="eyebrow">All Staff</span><h3>User Directory</h3></div><span class="status-pill">${state.users.length} users</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Phone</th><th>Role · Profile</th><th>Branch</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${state.users.map((u) => `<tr class="${!u.active ? "row-disabled" : ""}">
+            <td><b>${u.name}</b><br><small>${u.staffNo}</small></td>
+            <td>${u.phone}</td>
+            <td><span class="badge ${u.role === "Admin" ? "bm-approved" : "submitted"}">${u.role}</span> <small>${u.profile}</small></td>
+            <td><small>${branchName(u.branchId)}</small></td>
+            <td><span class="badge ${u.active ? "bqa-approved" : "rejected"}">${u.active ? "Active" : "Disabled"}</span>${u.mustChangePassword ? ' <span class="badge returned-with-comments" title="Must change password">PW</span>' : ""}</td>
+            <td class="action-cell">
+              ${u.id === me?.id ? '<small class="muted-text">You</small>' : `
+                ${u.active
+                  ? `<button class="mini-action muted" data-user-action="${u.id}:disable" type="button">Disable</button>`
+                  : `<button class="mini-action" data-user-action="${u.id}:enable" type="button">Enable</button>`}
+                <button class="mini-action muted" data-user-action="${u.id}:resetpw" type="button">Reset PW</button>
+                <button class="mini-action danger" data-user-action="${u.id}:delete" type="button">Delete</button>
+              `}
+            </td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function adminView(user) {
+  const sections = [
+    { key: "users",    icon: "👤", label: "Users" },
+    { key: "roles",    icon: "🔐", label: "Roles & Access" },
+    { key: "branches", icon: "🏢", label: "Branches" },
+    { key: "kpi",      icon: "📊", label: "KPI Weights" },
+    { key: "system",   icon: "🔒", label: "System" }
+  ];
+  const open = state.adminSection || "users";
+
+  const content = {
+    users: `
+      <div class="admin-panel-block">${adminUserCreateForm()}</div>
+      <div class="admin-panel-block">${userManagementPanel()}</div>
+    `,
+    roles: `
+      <div class="admin-panel-block">${accessControlPanel()}</div>
+      <div class="admin-panel-block">${roleManagementPanel()}</div>
+    `,
+    branches: `
+      <div class="admin-panel-block">
+        <div class="panel-heading"><div><span class="eyebrow">Branches</span><h3>Branch Directory</h3></div><span class="status-pill">${state.branches.length} branches</span></div>
+        ${branchManagementPanel()}
+      </div>
+    `,
+    kpi: `
+      <div class="admin-panel-block">
+        <div class="panel-heading"><div><span class="eyebrow">Scoring</span><h3>KPI Weights</h3></div></div>
+        <form id="kpiWeightForm" class="weight-list">${state.kpis.map((kpi) => `<label class="weight-row"><b>${kpi.name}</b><input name="weight-${kpi.id}" type="number" min="0" max="100" value="${kpi.weight}" /><span>%</span></label>`).join("")}<button class="secondary-action" type="submit">Save Weights</button></form>
+      </div>
+    `,
+    system: `
+      <div class="admin-panel-block">${backupPanel()}</div>
+      <div class="admin-panel-block">${demoAccessPanel()}</div>
+    `
+  };
+
+  return `
+    <div class="admin-layout">
+      <nav class="admin-nav">
+        ${sections.map((s) => `<button class="admin-nav-btn ${open === s.key ? "active" : ""}" data-admin-section="${s.key}" type="button"><span class="admin-nav-icon">${s.icon}</span><span class="admin-nav-label">${s.label}</span></button>`).join("")}
+      </nav>
+      <div class="admin-content">
+        ${content[open] || ""}
+      </div>
+    </div>
   `;
 }
 
@@ -943,6 +1144,21 @@ function backupPanel() {
 }
 
 function bindEvents() {
+  document.querySelector("#changePasswordForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const newPw = String(form.get("newPw")).trim();
+    const confirmPw = String(form.get("confirmPw")).trim();
+    const errEl = document.querySelector("#pwError");
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; } };
+    if (!isSimplePasswordValid(newPw)) return showErr("Password must be at least 6 characters.");
+    if (newPw !== confirmPw) return showErr("Passwords do not match.");
+    state.users = state.users.map((u) => u.id === state.activeUserId ? { ...u, password: newPw, mustChangePassword: false } : u);
+    addAudit("Password changed", activeUser()?.phone || "");
+    saveState();
+    render();
+  });
+
   const sidebarToggle = document.querySelector("#sidebarToggle");
   const appSidebar = document.querySelector("#appSidebar");
   const sidebarOverlay = document.querySelector("#sidebarOverlay");
@@ -979,7 +1195,12 @@ function bindEvents() {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const phone = normalizePhone(form.get("phone"));
-    if (state.users.some((item) => normalizePhone(item.phone) === phone)) return alert("Phone number already exists.");
+    const name = String(form.get("name")).trim();
+    const errEl = document.querySelector("#signupError");
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; } };
+    if (errEl) errEl.style.display = "none";
+    if (state.users.some((u) => normalizePhone(u.phone) === phone)) return showErr(`An account with phone number ${phone} already exists. Please log in instead.`);
+    if (state.users.some((u) => u.name.toLowerCase() === name.toLowerCase())) return showErr(`The name "${name}" is already registered. Contact your Admin if you need access.`);
     const user = createUser(form, "Staff");
     state.generatedPassword = { phone: user.phone, password: user.password };
     state.authMode = "signup";
@@ -1062,12 +1283,55 @@ function bindEvents() {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const phone = normalizePhone(form.get("phone"));
-    if (state.users.some((item) => normalizePhone(item.phone) === phone)) return alert("Phone number already exists.");
+    const name = String(form.get("name")).trim();
+    const errEl = document.querySelector("#adminUserError");
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; } };
+    if (errEl) errEl.style.display = "none";
+    if (state.users.some((u) => normalizePhone(u.phone) === phone)) return showErr(`Phone ${phone} is already registered to an existing account.`);
+    if (state.users.some((u) => u.name.toLowerCase() === name.toLowerCase())) return showErr(`A user named "${name}" already exists. Use a different name or check the directory.`);
     const user = createUser(form);
     state.generatedPassword = { phone: user.phone, password: user.password };
     addAudit("Admin created user", user.phone);
     saveState();
     render();
+  });
+
+  document.querySelectorAll("[data-admin-section]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.adminSection = btn.dataset.adminSection;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-user-action]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const [idStr, action] = btn.dataset.userAction.split(":");
+      const id = Number(idStr);
+      const target = state.users.find((u) => u.id === id);
+      if (!target) return;
+      if (action === "enable") {
+        state.users = state.users.map((u) => u.id === id ? { ...u, active: true } : u);
+        addAudit("User enabled", target.phone);
+        saveState(); render();
+      } else if (action === "disable") {
+        if (!confirm(`Disable ${target.name}? They will not be able to log in.`)) return;
+        state.users = state.users.map((u) => u.id === id ? { ...u, active: false } : u);
+        addAudit("User disabled", target.phone);
+        saveState(); render();
+      } else if (action === "delete") {
+        if (state.entries.some((e) => e.userId === id)) return alert(`Cannot delete ${target.name} — they have submitted entries. Disable instead.`);
+        if (!confirm(`Permanently delete ${target.name}? This cannot be undone.`)) return;
+        state.users = state.users.filter((u) => u.id !== id);
+        addAudit("User deleted", target.phone);
+        saveState(); render();
+      } else if (action === "resetpw") {
+        const newPw = createRandomPassword();
+        state.users = state.users.map((u) => u.id === id ? { ...u, password: newPw, mustChangePassword: true } : u);
+        state.generatedPassword = { phone: target.phone, password: newPw };
+        addAudit("Password reset by Admin", target.phone);
+        saveState(); render();
+      }
+    });
   });
 
   document.querySelector("#kpiWeightForm")?.addEventListener("submit", (event) => {
@@ -1218,13 +1482,14 @@ function createUser(form, forcedRole) {
   const user = {
     id: Date.now(),
     staffNo: `USR${String(state.users.length + 1).padStart(3, "0")}`,
-    name: String(form.get("name")),
+    name: String(form.get("name")).trim(),
     phone: normalizePhone(form.get("phone")),
     password,
     role,
     profile: String(form.get("profile")),
     branchId: noBranch ? "zonal" : String(form.get("branchId")),
-    active: true
+    active: true,
+    mustChangePassword: true
   };
   state.users.push(user);
   return user;
