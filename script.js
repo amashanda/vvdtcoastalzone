@@ -785,7 +785,7 @@ function adminView(user) {
                 ${["MBB", "RO", "MCE", "TL", "Premier RM", "SSO", "Freelancer", "Digital Champion"].map((p) => `<option value="${p}">${p}</option>`).join("")}
               </optgroup>
               <optgroup label="Zonal Staff">
-                ${["TL", "Premier RM", "MCE"].map((p) => `<option value="${p}">${p}</option>`).join("")}
+                ${["ZM", "ZBM", "ZQA", "HRBP"].map((p) => `<option value="${p}">${p}</option>`).join("")}
               </optgroup>
             </select>
           </label>
