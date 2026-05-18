@@ -838,6 +838,21 @@ td small {
   letter-spacing: 0.04em;
 }
 
+/* ── Records panel (full-width table in reports) ─────── */
+.records-panel {
+  overflow: hidden;
+}
+
+.records-panel .table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.records-panel table {
+  min-width: 680px;
+}
+
 /* ── Backup grid ────────────────────────────────────── */
 .backup-grid {
   display: grid;
@@ -896,7 +911,8 @@ td small {
   .panel { border: 1px solid #ccc; box-shadow: none; margin-bottom: 12pt; }
   .metric-grid { grid-template-columns: repeat(4, 1fr); }
   .content-grid { grid-template-columns: 1fr; }
-  table { min-width: 0; width: 100%; font-size: 9pt; }
+  table { min-width: 0 !important; width: 100%; font-size: 9pt; }
+  .records-panel { overflow: visible; padding: 0; border: none; box-shadow: none; }
   th, td { padding: 5pt 7pt; }
   .meter { display: none; }
 
@@ -1004,6 +1020,11 @@ td small {
   .admin-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding-bottom: 8px; gap: 6px; }
   .admin-nav-btn { flex-direction: row; gap: 6px; min-width: max-content; padding: 10px 14px; }
   .action-cell { display: flex; flex-wrap: wrap; gap: 4px; }
+
+  #reportsPrintArea { padding: 14px; }
+  .records-panel { padding: 12px 8px; }
+  .records-panel th, .records-panel td { padding: 10px 8px; font-size: 0.8rem; }
+  .report-toolbar { flex-wrap: wrap; }
 }
 
 /* ── Password change overlay ─────────────────────── */

@@ -824,16 +824,14 @@ function reportsView(user) {
         </div>
       ` : ""}
 
-      <div class="content-grid">
-        <article class="panel flat">
-          <div class="panel-heading"><div><span class="eyebrow">Status Breakdown</span><h3>Validation Summary</h3></div></div>
-          <div class="attention-list">${Object.entries(statusCounts(entries)).map(([status, count]) => `<div><b>${count}</b><span>${status}</span></div>`).join("") || `<p class="empty-state">No status data.</p>`}</div>
-        </article>
-        <article class="panel flat wide">
-          <div class="panel-heading"><div><span class="eyebrow">All Records</span><h3>Entry Details</h3></div></div>
-          ${exportReadyTable(entries)}
-        </article>
-      </div>
+      <article class="panel flat" style="margin-bottom:18px">
+        <div class="panel-heading"><div><span class="eyebrow">Status Breakdown</span><h3>Validation Summary</h3></div></div>
+        <div class="status-grid">${Object.entries(statusCounts(entries)).map(([status, count]) => `<div><b>${count}</b><span>${status}</span></div>`).join("") || `<p class="empty-state">No status data.</p>`}</div>
+      </article>
+      <article class="panel flat records-panel">
+        <div class="panel-heading"><div><span class="eyebrow">All Records</span><h3>Entry Details</h3></div></div>
+        ${exportReadyTable(entries)}
+      </article>
     </section>
   `;
 }
@@ -1366,6 +1364,7 @@ function bindEvents() {
     addAudit("Admin created user", user.phone);
     saveState();
     render();
+    showSuccessModal("User created", `${user.name} has been added. Temporary password: ${user.password} — share this securely.`);
   });
 
   document.querySelectorAll("[data-admin-section]").forEach((btn) => {
@@ -1385,23 +1384,27 @@ function bindEvents() {
         state.users = state.users.map((u) => u.id === id ? { ...u, active: true } : u);
         addAudit("User enabled", target.phone);
         saveState(); render();
+        showSuccessModal("User enabled", `${target.name} can now log in.`);
       } else if (action === "disable") {
         if (!confirm(`Disable ${target.name}? They will not be able to log in.`)) return;
         state.users = state.users.map((u) => u.id === id ? { ...u, active: false } : u);
         addAudit("User disabled", target.phone);
         saveState(); render();
+        showSuccessModal("User disabled", `${target.name} has been deactivated.`);
       } else if (action === "delete") {
         if (state.entries.some((e) => e.userId === id)) return alert(`Cannot delete ${target.name} — they have submitted entries. Disable instead.`);
         if (!confirm(`Permanently delete ${target.name}? This cannot be undone.`)) return;
         state.users = state.users.filter((u) => u.id !== id);
         addAudit("User deleted", target.phone);
         saveState(); render();
+        showSuccessModal("User deleted", `${target.name} has been permanently removed.`);
       } else if (action === "resetpw") {
         const newPw = createRandomPassword();
         state.users = state.users.map((u) => u.id === id ? { ...u, password: newPw, mustChangePassword: true } : u);
         state.generatedPassword = { phone: target.phone, password: newPw };
         addAudit("Password reset by Admin", target.phone);
         saveState(); render();
+        showSuccessModal("Password reset", `Temporary password for ${target.name}: ${newPw} — they will be prompted to change it on next login.`);
       }
     });
   });
@@ -1420,6 +1423,7 @@ function bindEvents() {
     addAudit("KPI weights updated", "Scoring engine");
     saveState();
     render();
+    showSuccessModal("KPI weights saved", `Scoring weights updated. New total: ${total}%.`);
   });
 
   document.querySelectorAll("#kpiWeightForm input[type='number']").forEach((input) => {
@@ -1466,6 +1470,7 @@ function bindEvents() {
     addAudit("Role created", key, `Type: ${type}, Modules: ${modules.join(", ") || "none"}`);
     saveState();
     render();
+    showSuccessModal("Role created", `"${label}" role (${type}) has been added with ${modules.length} module${modules.length !== 1 ? "s" : ""}.`);
   });
 
   document.querySelectorAll("[data-delete-role]").forEach((button) => {
@@ -1502,6 +1507,7 @@ function bindEvents() {
       addAudit("Branch updated", id, `${name} · ${cls}`);
       saveState();
       render();
+      showSuccessModal("Branch updated", `${name} (${id}) saved as ${cls}.`);
     });
   });
 
@@ -1530,6 +1536,7 @@ function bindEvents() {
     addAudit("Branch added", code, name);
     saveState();
     render();
+    showSuccessModal("Branch added", `${name} (Sort code: ${code}) has been added to the register.`);
   });
 
   document.querySelectorAll("[data-restore-backup]").forEach((button) => {
@@ -1567,6 +1574,7 @@ function bindEvents() {
     addAudit("Access control updated", "Role permissions");
     saveState();
     render();
+    showSuccessModal("Access control saved", "Module permissions have been updated for all roles.");
   });
 }
 
