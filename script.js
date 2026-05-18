@@ -136,29 +136,42 @@ const baseState = {
 
 let state = loadState();
 
-function loadState() {
+fasync function loadState() {
   try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (!stored) return structuredClone(baseState);
-    const merged = { ...structuredClone(baseState), ...stored };
-    if (!merged.roleCatalog) merged.roleCatalog = structuredClone(defaultRoleCatalog);
-    // Migrate HR → HRBP
-    const hrEntry = merged.roleCatalog.find((r) => r.key === "HR");
-    if (hrEntry) { hrEntry.key = "HRBP"; hrEntry.label = "HRBP"; }
-    if (merged.rolePermissions["HR"]) { merged.rolePermissions["HRBP"] = merged.rolePermissions["HR"]; delete merged.rolePermissions["HR"]; }
-    merged.users = (merged.users || []).map((u) => u.role === "HR" ? { ...u, role: "HRBP" } : u);
-    // Migrate Admin to Super type
-    const adminEntry = merged.roleCatalog.find((r) => r.key === "Admin");
-    if (adminEntry) adminEntry.type = "Super";
-    defaultRoleCatalog.forEach((def) => {
-      if (!merged.roleCatalog.find((r) => r.key === def.key)) merged.roleCatalog.push({ ...def });
-    });
-    defaultRoleCatalog.forEach((def) => {
-      if (!merged.rolePermissions[def.key]) merged.rolePermissions[def.key] = defaultRolePermissions[def.key] || [];
-    });
-    return merged;
-  } catch {
-    return structuredClone(baseState);
+    if (window.db) {
+      const q = window.query(
+        window.collection(window.db, "backups"),
+        window.orderBy("savedAt", "desc"),
+        window.limit(1)
+      );
+
+      const snapshot = await window.getDocs(q);
+
+      if (!snapshot.empty) {
+        const latest = snapshot.docs[0].data();
+
+        console.log("Loaded from Firestore");
+
+        return {
+          ...state,
+          users: latest.users || [],
+          entries: latest.entries || [],
+          branchReports: latest.branchReports || [],
+          auditLogs: latest.auditLogs || []
+        };
+      }
+    }
+
+    return JSON.parse(
+      localStorage.getItem(STORAGE_KEY)
+    ) || DEFAULT_STATE;
+
+  } catch (err) {
+    console.error("Load failed:", err);
+
+    return JSON.parse(
+      localStorage.getItem(STORAGE_KEY)
+    ) || DEFAULT_STATE;
   }
 }
 
