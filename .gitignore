@@ -2,3 +2,6 @@
 node_modules/
 *.log
 ~$*.docx
+
+# Firebase credentials — never commit real API keys
+firebase-config.js
