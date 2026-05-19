@@ -1279,3 +1279,76 @@ td small {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── Filter bar ─────────────────────────────────────── */
+.filter-bar {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 18px;
+  background: var(--mist-green);
+  margin-bottom: 18px;
+}
+
+.filter-bar-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.filter-bar-title {
+  font-weight: 900;
+  font-size: 0.88rem;
+  color: var(--deep-green);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-active-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--deep-green);
+  color: var(--white);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.filter-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.filter-label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--muted);
+  min-width: 130px;
+}
+
+.filter-label select,
+.filter-label input[type="date"] {
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  background: var(--white);
+}
+
+@media (max-width: 860px) {
+  .filter-controls { flex-direction: column; }
+  .filter-label { min-width: 100%; }
+}
+
+.vvdt-changepw-overlay #voluntaryPwCancel {
+  margin-top: 8px;
+  width: 100%;
+}

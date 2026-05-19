@@ -128,6 +128,7 @@ const baseState = {
   branchReports: [
     { id: 1, branchId: "3330", date: "2026-05-17", entryIds: [4], status: "BM Approved", bqaComment: "Opening branch report approved for seed data.", bmComment: "Approved.", submittedBy: 3, reviewedBy: 4, createdAt: "2026-05-17 18:10", updatedAt: "2026-05-17 18:30" }
   ],
+  reportFilters: { branches: [], staffId: "", dateFrom: "", dateTo: "", status: "" },
   generatedPassword: null,
   auditLogs: [
     { id: 1, actor: "System", action: "Rollout initialized", entity: "Application", note: "Seeded phone login, permissions, BQA/BM workflow.", time: "2026-05-18 12:00" }
@@ -343,6 +344,24 @@ function periodEntries(entries, period = state.reportPeriod) {
   });
 }
 
+function filteredEntries(user) {
+  const f = state.reportFilters || {};
+  let entries = entriesVisibleTo(user);
+
+  // Use custom date range if set, else fall back to period preset
+  if (f.dateFrom || f.dateTo) {
+    if (f.dateFrom) entries = entries.filter((e) => e.date >= f.dateFrom);
+    if (f.dateTo)   entries = entries.filter((e) => e.date <= f.dateTo);
+  } else {
+    entries = periodEntries(entries);
+  }
+
+  if (f.branches?.length) entries = entries.filter((e) => f.branches.includes(e.branchId));
+  if (f.staffId)           entries = entries.filter((e) => String(e.userId) === String(f.staffId));
+  if (f.status)            entries = entries.filter((e) => e.status === f.status);
+  return entries;
+}
+
 function averageScore(entries) {
   if (!entries.length) return 0;
   return entries.reduce((sum, entry) => sum + scoreEntry(entry).finalIndex, 0) / entries.length;
@@ -411,11 +430,11 @@ function authScreen() {
   return `
     <main class="auth-page">
       <section class="auth-hero image-hero">
-        <img class="login-dhow" src="DHOW IMAGE.jpg" alt="Dhow sailing on the coast" />
+        <img class="login-dhow" src="Coastal Zone Dhow.jpg" alt="Dhow sailing on the coast" />
         <div class="auth-overlay">
           <span class="eyebrow">CRDB Bank PLC · Coastal Zone</span>
           <h1>Volume & Value Daily Tracker</h1>
-          <p>Dhow Family, We Achieve Together. Secure daily KPI capture, validation, performance scoring, and branch visibility.</p>
+          <p>One Dhow. One Direction. One Results. Secure daily KPI capture, validation, performance scoring, and branch visibility.</p>
         </div>
         <img class="login-logo" src="CRDB logo.png" alt="CRDB Bank logo" />
       </section>
@@ -503,9 +522,10 @@ function appShell(user) {
       </aside>
       <main>
         <header class="topbar">
-          <div><p>Dhow Family, We Achieve Together</p><h1>${viewTitle()}</h1></div>
+          <div><p>One Dhow. One Direction. One Results.</p><h1>${viewTitle()}</h1></div>
           <div class="topbar-actions">
             <span class="profile-chip"><b>${user.role}</b><small>${user.phone}</small></span>
+            <button class="secondary-action" data-action="changepw" type="button">Change PW</button>
             <button class="secondary-action" data-action="logout" type="button">Logout</button>
           </div>
         </header>
@@ -548,7 +568,7 @@ function restrictedView() {
 }
 
 function dashboardView(user) {
-  if (user.role === "Admin") return adminDashboard(user);
+  if (isSuperRole(user.role) || isZonalRole(user.role)) return zonalDashboard(user);
   if (user.role === "BQA") return bqaDashboard(user);
   if (user.role === "BM") return bmDashboard(user);
   return staffDashboard(user);
@@ -637,6 +657,59 @@ function adminDashboard(user) {
       </div></article>
       <article class="panel"><div class="panel-heading"><div><span class="eyebrow">Status</span><h3>Entry Breakdown</h3></div></div><div class="attention-list">${Object.entries(statusCounts(entries)).map(([status, count]) => `<div><b>${count}</b><span>${status}</span></div>`).join("")}</div></article>
     </section>
+  `;
+}
+
+function zonalDashboard(user) {
+  const allEntries = entriesVisibleTo(user);
+  const allStaff = state.users.filter((u) => u.active && (u.role === "Staff" || u.role === "BQA" || u.role === "BM"));
+  const activeStaff = allStaff.length || 1;
+
+  // Build per-KPI consolidated rows: total target = sum of per-user targets, total actual = sum of all entry values
+  const kpiRows = state.kpis.filter((k) => k.active && k.scope === "Individual").map((kpi) => {
+    const totalTarget = allStaff.reduce((sum, u) => sum + targetForKpi(kpi, u), 0);
+    const totalActual = allEntries.reduce((sum, e) => sum + Number(e.values[kpi.id] || 0), 0);
+    const pct = totalTarget > 0 ? Math.min((totalActual / totalTarget) * 100, 150) : 0;
+    return { kpi, actual: totalActual, target: totalTarget, pct };
+  }).filter((r) => r.target > 0 || r.actual > 0);
+
+  const branchCount = new Set(allEntries.map((e) => e.branchId)).size;
+  const approvedCount = allEntries.filter((e) => e.status === "BQA Approved").length;
+
+  return `
+    <section class="metric-grid">
+      ${metricCard("Zone Score", `${averageScore(allEntries).toFixed(1)}%`, performanceCategory(averageScore(allEntries)), averageScore(allEntries))}
+      ${metricCard("Total Entries", allEntries.length, `${branchCount} branch${branchCount !== 1 ? "es" : ""} reporting`, Math.min(allEntries.length * 8, 100))}
+      ${metricCard("Active Staff", activeStaff, "Users across all branches", 100)}
+      ${metricCard("BQA Approved", approvedCount, "Validated zone-wide", Math.min(approvedCount * 15, 100))}
+    </section>
+    <section class="content-grid">
+      <article class="panel wide">
+        <div class="panel-heading">
+          <div><span class="eyebrow">Zone consolidated · All teams</span><h3>Total Targets vs Actuals</h3></div>
+        </div>
+        <div class="leaderboard">${kpiRows.map((row) => progressRow(row)).join("") || `<p class="empty-state">No entries recorded yet.</p>`}</div>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><span class="eyebrow">Submission status</span><h3>Zone Overview</h3></div></div>
+        <div class="submission-feed">${Object.entries(statusCounts(allEntries)).map(([status, count]) => `
+          <div class="submission-feed-item">
+            <div class="feed-row"><span class="badge ${statusClass(status)}">${escapeHtml(status)}</span><small>${count}</small></div>
+          </div>`).join("") || `<p class="empty-state">No data yet.</p>`}
+        </div>
+      </article>
+    </section>
+    ${isSuperRole(user.role) || isZonalRole(user.role) ? `
+    <div class="content-grid">
+      <article class="panel flat">
+        <div class="panel-heading"><div><span class="eyebrow">Branch Ranking</span><h3>Branch Leaderboard</h3></div></div>
+        ${branchLeaderboard(allEntries)}
+      </article>
+      <article class="panel flat">
+        <div class="panel-heading"><div><span class="eyebrow">Staff Ranking</span><h3>Top Performers</h3></div></div>
+        ${staffLeaderboard(allEntries)}
+      </article>
+    </div>` : ""}
   `;
 }
 
@@ -814,14 +887,57 @@ function staffLeaderboard(entries) {
     </div>`;
 }
 
+function reportFiltersPanel(user) {
+  const f = state.reportFilters || {};
+  const isBigView = isSuperRole(user.role) || isZonalRole(user.role);
+  const active = [f.branches?.length, f.staffId, f.dateFrom, f.dateTo, f.status].filter(Boolean).length;
+  return `
+    <div class="filter-bar">
+      <div class="filter-bar-head">
+        <span class="filter-bar-title">&#x1F50D; Filters ${active ? `<span class="filter-active-badge">${active} active</span>` : ""}</span>
+        ${active ? `<button class="link-action" data-action="clear-filters" type="button">Clear all</button>` : ""}
+      </div>
+      <div class="filter-controls">
+        ${isBigView ? `
+        <label class="filter-label">Branch
+          <select id="filterBranch" name="filterBranch">
+            <option value="">All branches</option>
+            ${state.branches.map((b) => `<option value="${b.id}" ${f.branches?.includes(b.id) ? "selected" : ""}>${b.code} · ${b.name}</option>`).join("")}
+          </select>
+        </label>
+        <label class="filter-label">Staff
+          <select id="filterStaff" name="filterStaff">
+            <option value="">All staff</option>
+            ${state.users.filter((u) => u.role === "Staff" && u.active).map((u) => `<option value="${u.id}" ${f.staffId === String(u.id) ? "selected" : ""}>${u.name} · ${u.profile}</option>`).join("")}
+          </select>
+        </label>` : ""}
+        <label class="filter-label">From
+          <input type="date" id="filterDateFrom" value="${f.dateFrom || ""}" />
+        </label>
+        <label class="filter-label">To
+          <input type="date" id="filterDateTo" value="${f.dateTo || ""}" />
+        </label>
+        <label class="filter-label">Status
+          <select id="filterStatus" name="filterStatus">
+            <option value="">All statuses</option>
+            ${["Submitted","BQA Approved","Rejected","Returned with Comments","Submitted to BM","BM Approved","BM Returned"].map((s) => `<option value="${s}" ${f.status === s ? "selected" : ""}>${s}</option>`).join("")}
+          </select>
+        </label>
+        <button class="primary-action" data-action="apply-filters" style="align-self:flex-end" type="button">Apply</button>
+      </div>
+    </div>
+  `;
+}
+
 function reportsView(user) {
-  const entries = periodEntries(entriesVisibleTo(user));
+  const entries = filteredEntries(user);
   const kpiRows = summarizeKpis(entries);
   const top = kpiRows[0];
   const under = kpiRows.find((row) => row.actual < row.kpi.target);
   const showLeaderboards = isSuperRole(user.role) || isZonalRole(user.role);
   const periodLabel = `${state.reportPeriod} Report — ${new Date().toLocaleDateString("en-GB")}`;
   return `
+    ${reportFiltersPanel(user)}
     <section class="panel" id="reportsPrintArea">
       <div class="panel-heading">
         <div><span class="eyebrow">CRDB Bank · Coastal Zone</span><h3>${periodLabel}</h3></div>
@@ -963,6 +1079,12 @@ function adminUserCreateForm() {
           </optgroup>
           <optgroup label="Zonal Staff">
             ${["ZM", "ZBM", "ZQA", "HRBP"].map((p) => `<option value="${p}">${p}</option>`).join("")}
+          </optgroup>
+          <optgroup label="General (Admin / Super)">
+            <option value="System Admin">System Admin</option>
+            <option value="Manager">Manager</option>
+            <option value="Superuser">Superuser</option>
+            <option value="Analyst">Analyst</option>
           </optgroup>
         </select>
       </label>
@@ -1239,6 +1361,45 @@ function showCommentModal(title, placeholder, required, onConfirm) {
   });
 }
 
+function changePasswordModal() {
+  const existing = document.querySelector(".vvdt-changepw-overlay");
+  if (existing) existing.remove();
+  const el = document.createElement("div");
+  el.className = "vvdt-changepw-overlay pw-overlay";
+  el.innerHTML = `
+    <div class="pw-card">
+      <img src="CRDB logo.png" alt="CRDB" class="pw-logo" />
+      <h2>Change Password</h2>
+      <p class="body-copy">Enter your current password, then choose a new one (minimum 6 characters).</p>
+      <form class="auth-form" id="voluntaryPwForm">
+        <label>Current Password <input name="currentPw" type="password" placeholder="Your current password" required autocomplete="current-password" /></label>
+        <label>New Password <input name="newPw" type="password" minlength="6" placeholder="At least 6 characters" required autocomplete="new-password" /></label>
+        <label>Confirm New Password <input name="confirmPw" type="password" minlength="6" placeholder="Repeat new password" required autocomplete="new-password" /></label>
+        <button class="primary-action" type="submit">Update Password</button>
+        <button class="secondary-action" id="voluntaryPwCancel" type="button">Cancel</button>
+        <p id="voluntaryPwError" class="danger-note" style="display:none"></p>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(el);
+  document.querySelector("#voluntaryPwCancel")?.addEventListener("click", () => el.remove());
+  document.querySelector("#voluntaryPwForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const user = activeUser();
+    const errEl = document.querySelector("#voluntaryPwError");
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; } };
+    if (form.get("currentPw") !== user.password) return showErr("Current password is incorrect.");
+    if (!isSimplePasswordValid(form.get("newPw"))) return showErr("New password must be at least 6 characters.");
+    if (form.get("newPw") !== form.get("confirmPw")) return showErr("New passwords do not match.");
+    state.users = state.users.map((u) => u.id === user.id ? { ...u, password: form.get("newPw") } : u);
+    addAudit("Password changed voluntarily", user.phone);
+    saveState();
+    el.remove();
+    showSuccessModal("Password updated", "Your password has been changed successfully.");
+  });
+}
+
 function bindEvents() {
   document.querySelector("#changePasswordForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1316,6 +1477,8 @@ function bindEvents() {
       render();
     });
   });
+
+  document.querySelector("[data-action='changepw']")?.addEventListener("click", () => changePasswordModal());
 
   document.querySelector("[data-action='logout']")?.addEventListener("click", () => {
     addAudit("User logged out", activeUser()?.phone || "Unknown");
@@ -1581,11 +1744,35 @@ function bindEvents() {
   document.querySelectorAll("[data-export]").forEach((button) => {
     button.addEventListener("click", () => {
       const user = activeUser();
-      const entries = periodEntries(entriesVisibleTo(user));
+      const entries = filteredEntries(user);
       if (button.dataset.export === "csv") exportCSV(entries);
       else if (button.dataset.export === "xls") exportXLS(entries);
       else if (button.dataset.export === "pdf") exportPDF();
     });
+  });
+
+  document.querySelector("[data-action='apply-filters']")?.addEventListener("click", () => {
+    const isBigView = isSuperRole(activeUser()?.role) || isZonalRole(activeUser()?.role);
+    const branch = isBigView ? document.querySelector("#filterBranch")?.value : "";
+    const staff  = isBigView ? document.querySelector("#filterStaff")?.value  : "";
+    const from   = document.querySelector("#filterDateFrom")?.value || "";
+    const to     = document.querySelector("#filterDateTo")?.value   || "";
+    const status = document.querySelector("#filterStatus")?.value   || "";
+    state.reportFilters = {
+      branches: branch ? [branch] : [],
+      staffId: staff,
+      dateFrom: from,
+      dateTo: to,
+      status
+    };
+    saveState();
+    render();
+  });
+
+  document.querySelector("[data-action='clear-filters']")?.addEventListener("click", () => {
+    state.reportFilters = { branches: [], staffId: "", dateFrom: "", dateTo: "", status: "" };
+    saveState();
+    render();
   });
 
   document.querySelector("#permissionForm")?.addEventListener("submit", (event) => {
