@@ -1,109 +1,143 @@
 # VVDT — Volume & Value Daily Tracker
+### CRDB Bank PLC · Coastal Zone
 
-Executive-grade mobile-first prototype for Coastal Zone, CRDB Bank PLC, built from `MVP-VVDT.docx`.
+A mobile-first, single-page web application for daily KPI capture, BQA validation, BM approval, and consolidated performance reporting across all Coastal Zone branches.
 
-## What Was Built
+---
 
-- Responsive web portal prototype: `index.html`
-- CRDB green executive theme using Montserrat-first typography
-- Login page using `DHOW IMAGE.jpg` and `CRDB logo.png`
-- Role-specific dashboards for Staff/DC, BQA, BM, ZBM/ZM, and Admin
-- BQA entry approval, rejection, return-with-comments, and consolidated branch report submission to BM
-- BM consolidated report approval and return-with-comments workflow
-- Admin-only reports, audit trail, demo access, and role-module access control
-- Phone-number login, quick signup with random default password generation, admin user creation, BQA validation, role-aware navigation, and browser-local demo storage
-- Full Coastal Zone branch register using sort code as the unique branch identifier
-- PostgreSQL starter schema: `database-schema.sql`
+## Quick Start
 
-## How To Open
+```bash
+# Open locally — no install required
+open index.html
 
-Open this file in a browser:
+# Or serve via Python for correct module loading
+python3 -m http.server 4173
+# then visit http://localhost:4173
 
-`/Users/ortega/Desktop/Images/VVDT COASTAL ZONE/index.html`
+# Check JS syntax
+node --check script.js
+```
 
-No installation is required. The prototype is plain HTML, CSS, and JavaScript.
+**Firebase credentials** — copy the template and fill in your project values:
+```bash
+cp firebase-config.example.js firebase-config.js
+# edit firebase-config.js with real values (never commit it)
+```
 
-## Demo Login
+---
 
-Demo credentials are shown inside the app only after Admin login.
+## Demo Logins
 
-- Admin: `255700000001` / `Admin@2026`
-- Staff: `255700000002` / `Staff@2026`
-- BQA: `255700000003` / `Bqa@2026`
-- BM: `255700000004` / `Bm@2026`
-- ZBM: `255700000005` / `Zbm@2026`
-- ZM: `255700000006` / `Zm@2026`
+| Role | Phone | Password | Access |
+|------|-------|----------|--------|
+| Admin | 255700000001 | Admin@2026 | Full — all modules |
+| Staff | 255700000002 | Staff@2026 | Dashboard, Capture |
+| BQA | 255700000003 | Bqa@2026 | Dashboard, Capture, Validation, Reports |
+| BM | 255700000004 | Bm@2026 | Dashboard, BM Review, Reports |
+| ZBM | 255700000005 | Zbm@2026 | Dashboard, Reports |
+| ZM | 255700000006 | Zm@2026 | Dashboard, Reports |
 
-## Workflow States
+---
 
-- Staff/DC submits KPI entries as `Submitted`.
-- BQA can mark entries as `BQA Approved`, `Rejected`, or `Returned with Comments`.
-- BQA can submit all approved branch entries as a consolidated branch report with status `Submitted to BM`.
-- BM can mark consolidated reports as `BM Approved` or `BM Returned`.
-- Comments, actors, and timestamps are written to the in-browser audit trail.
+## Workflow Summary
+
+```
+Staff / DC
+  └─ Submits KPI entry (Daily Capture)
+       └─ status: "Submitted"
+
+BQA
+  ├─ Approves    → "BQA Approved"
+  ├─ Returns     → "Returned with Comments"  (comment required)
+  ├─ Rejects     → "Rejected"               (comment required)
+  └─ Consolidates approved entries → Branch Report → "Submitted to BM"
+
+BM
+  ├─ Approves    → "BM Approved"
+  └─ Returns     → "BM Returned"            (comment required)
+
+Zonal / Admin
+  └─ Read-only consolidated view of all entries and branch reports
+```
+
+---
 
 ## Role Access Defaults
 
-- Staff/DC: Dashboard, Daily Capture.
-- BQA: Dashboard, Daily Capture, BQA Validation.
-- BM: Dashboard, BM Review.
-- ZBM/ZM: Dashboard.
-- Admin: Dashboard, Daily Capture, BQA Validation, BM Review, Reports, Audit Trail, Admin Setup, Demo Access.
+| Role | Dashboard | Capture | Validation | BM Review | Reports | Audit | Admin |
+|------|-----------|---------|------------|-----------|---------|-------|-------|
+| Staff | ✓ | ✓ | | | | | |
+| BQA | ✓ | ✓ | ✓ | | ✓ | | |
+| BM | ✓ | | | ✓ | ✓ | | |
+| ZBM | ✓ | | | | ✓ | | |
+| ZM | ✓ | | | | ✓ | | |
+| ZQA | ✓ | | ✓ | | ✓ | | |
+| HRBP | ✓ | | | | ✓ | ✓ | |
+| Admin | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-## GitHub Pages
+Access is fully configurable per role in **Admin → Roles & Access**.
 
-This repository is ready for a static GitHub Pages deployment. Push the folder contents to GitHub and set Pages to serve from the repository root.
+---
 
-## Recommended Architecture
+## Files
 
-Recommended production path: standalone enterprise web app.
+| File | Purpose |
+|------|---------|
+| `index.html` | App shell — loads CSS, SheetJS, Firebase, main script |
+| `script.js` | Entire SPA — ~2 100 lines, single source of truth |
+| `styles.css` | All styles — CRDB green theme, responsive grid, components |
+| `firebase.js` | Firebase / Firestore init — exports `db`, `addDoc`, etc. to `window` |
+| `firebase-config.js` | **Git-ignored** — holds real `window.FIREBASE_CONFIG` credentials |
+| `firebase-config.example.js` | Safe placeholder template — safe to commit |
+| `CRDB logo.png` | CRDB Bank logo |
+| `Coastal Zone Dhow.jpg` | Login page hero background image |
+| `.github/workflows/deploy.yml` | GitHub Actions — injects Firebase secret, deploys to Pages |
+| `database-schema.sql` | PostgreSQL starter schema for future production migration |
+| `docs/ARCHITECTURE.md` | Technical architecture reference |
+| `docs/DECISIONS.md` | Key decisions log |
+| `docs/PENDING.md` | Known gaps and future work |
 
-- Frontend: Next.js / React
-- Backend: Node.js REST or GraphQL API
-- Database: PostgreSQL on Azure
-- Authentication: Microsoft Entra ID integration with JWT session handling
-- Storage: Azure Blob Storage for report exports and backup artifacts
-- Reporting: application dashboards first, Power BI integration for executive analytics
-- Hosting: Azure App Service or Azure Container Apps, with managed PostgreSQL
+---
 
-Power Apps, SharePoint, Azure SQL, Power BI, and Entra ID can accelerate internal workflow delivery, but a standalone build is better for VVDT’s custom weighted scoring, audit logs, advanced branch hierarchy, high-volume reporting, and long-term scalability.
+## Deployment — GitHub Pages
 
-## Core API Modules
+1. Push to `main` branch.
+2. GitHub Actions (`deploy.yml`) runs automatically.
+3. It injects `FIREBASE_CONFIG_JSON` (repo secret) into `firebase-config.js` at build time.
+4. The entire repo root is deployed as a static site.
 
-- Auth and role permissions
-- User, branch, and hierarchy management
-- KPI and target configuration
-- Weight configuration by role and branch classification
-- Daily performance entry
-- BQA validation workflow
-- BM consolidated report approval workflow
-- Score calculation service
-- Dashboards and leaderboards
-- PDF and Excel report export
-- Audit log and backup monitoring
+**Set the secret:** GitHub → Settings → Secrets and variables → Actions → New secret  
+Name: `FIREBASE_CONFIG_JSON`  
+Value: `{"apiKey":"...","authDomain":"...","projectId":"...","storageBucket":"...","messagingSenderId":"...","appId":"..."}`
 
-## Data Integrity
+Live URL: `https://amashanda.github.io/vvdtcoastalzone/`
 
-- Auto-stamped date and time for all submissions
-- One staff/KPI/date unique entry control
-- Draft, submitted, validated, and rejected workflow states
-- Historical targets and weights preserved with effective dates
-- Audit logs for configuration, performance, and user changes
-- Daily backups and tested restore process
+---
 
-## MVP Roadmap
+## Local Firebase Setup
 
-1. Authentication, users, branches, roles, KPI setup, targets, daily entries
-2. BQA validation, returns, rejections, weighted scoring, staff dashboard, branch dashboard
-3. BM consolidated report approval, admin reports, audit trail, and role access control
-4. Future production hardening: Power BI integration, automated backups, disaster recovery drills, performance tuning
+```
+firebase-config.js is NEVER committed (it's in .gitignore).
+Copy firebase-config.example.js → firebase-config.js and fill in your project values.
+If the file is absent the app still runs fully on localStorage — Firebase is optional backup.
+```
 
-## Local Checks
+GCP API restrictions for the Firebase API key:
+- Cloud Firestore API
+- Firebase Installations API
 
-Run:
+---
 
-`node --check script.js`
+## Production Path
 
-Optional local server:
+See `docs/ARCHITECTURE.md` for a full production architecture diagram.  
+Recommended stack: **Next.js → Node.js API → PostgreSQL on Azure**, with Entra ID auth.
 
-`python3 -m http.server 4173`
+---
+
+## Further Reading
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Design Decisions](docs/DECISIONS.md)
+- [Pending Tasks & Future Work](docs/PENDING.md)
