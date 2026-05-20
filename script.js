@@ -25,8 +25,8 @@ const demoCredentials = [
 
 const defaultRolePermissions = {
   Staff: ["dashboard", "capture"],
-  BQA: ["dashboard", "capture", "validation"],
-  BM: ["dashboard", "bmReview"],
+  BQA: ["dashboard", "capture", "validation", "reports"],
+  BM: ["dashboard", "bmReview", "reports"],
   ZBM: ["dashboard", "reports"],
   ZM: ["dashboard", "reports"],
   HRBP: ["dashboard", "reports", "audit"],
@@ -129,6 +129,7 @@ const baseState = {
     { id: 1, branchId: "3330", date: "2026-05-17", entryIds: [4], status: "BM Approved", bqaComment: "Opening branch report approved for seed data.", bmComment: "Approved.", submittedBy: 3, reviewedBy: 4, createdAt: "2026-05-17 18:10", updatedAt: "2026-05-17 18:30" }
   ],
   reportFilters: { branches: [], staffId: "", dateFrom: "", dateTo: "", status: "" },
+  bulkPreview: null,
   generatedPassword: null,
   auditLogs: [
     { id: 1, actor: "System", action: "Rollout initialized", entity: "Application", note: "Seeded phone login, permissions, BQA/BM workflow.", time: "2026-05-18 12:00" }
@@ -156,6 +157,12 @@ function loadState() {
     });
     defaultRoleCatalog.forEach((def) => {
       if (!merged.rolePermissions[def.key]) merged.rolePermissions[def.key] = defaultRolePermissions[def.key] || [];
+    });
+    // Migrate BQA and BM to include "reports" module
+    ["BQA", "BM"].forEach((role) => {
+      if (merged.rolePermissions[role] && !merged.rolePermissions[role].includes("reports")) {
+        merged.rolePermissions[role] = [...merged.rolePermissions[role], "reports"];
+      }
     });
     return merged;
   } catch (err) {
@@ -334,7 +341,7 @@ function entriesVisibleTo(user) {
 }
 
 function periodEntries(entries, period = state.reportPeriod) {
-  const today = new Date("2026-05-18T12:00:00");
+  const today = new Date();
   const days = { Daily: 1, Weekly: 7, Monthly: 31, Quarterly: 92 }[period] || 1;
   const start = new Date(today);
   start.setDate(today.getDate() - days + 1);
@@ -611,6 +618,14 @@ function bqaDashboard(user) {
   const entries = entriesVisibleTo(user);
   const counts = statusCounts(entries);
   const ready = consolidatableEntries(user.branchId).length;
+  const branchStaff = state.users.filter((u) => u.active && u.branchId === user.branchId);
+  const staffRows = branchStaff.map((u) => {
+    const uEntries = entries.filter((e) => e.userId === u.id);
+    const score = averageScore(uEntries);
+    const latest = uEntries[0];
+    return { user: u, count: uEntries.length, score, latest };
+  }).sort((a, b) => b.score - a.score || b.count - a.count);
+
   return `
     <section class="metric-grid">
       ${metricCard("Received", entries.length, "Branch submissions", 100)}
@@ -618,9 +633,31 @@ function bqaDashboard(user) {
       ${metricCard("Approved", counts["BQA Approved"] || 0, "Ready for BM consolidation", 85)}
       ${metricCard("Ready for BM", ready, "Can be consolidated", 80)}
     </section>
-    <section class="panel">
-      <div class="panel-heading"><div><span class="eyebrow">${branchName(user.branchId)}</span><h3>Branch Submission Status</h3></div></div>
-      <div class="status-grid">${Object.entries(counts).map(([status, count]) => `<div><b>${count}</b><span>${status}</span></div>`).join("") || `<p class="empty-state">No branch entries yet.</p>`}</div>
+    <section class="content-grid">
+      <article class="panel wide">
+        <div class="panel-heading"><div><span class="eyebrow">${branchName(user.branchId)} · All staff</span><h3>Branch Staff Performance</h3></div></div>
+        ${staffRows.length ? `
+          <div class="table-wrap">
+            <table class="leaderboard-table">
+              <thead><tr><th>#</th><th>Staff</th><th>Profile</th><th>Entries</th><th>Avg Score</th><th>Latest Status</th></tr></thead>
+              <tbody>
+                ${staffRows.map((r, i) => `<tr class="${r.score >= 90 && r.count ? "row-best" : r.score > 0 && r.score < 60 ? "row-worst" : ""}">
+                  <td><span class="rank-badge ${i === 0 ? "gold" : i === 1 ? "silver" : i === 2 ? "bronze" : ""}">${i + 1}</span></td>
+                  <td><b>${escapeHtml(r.user.name)}</b></td>
+                  <td><small>${escapeHtml(r.user.profile)}</small></td>
+                  <td>${r.count}</td>
+                  <td>${r.count ? r.score.toFixed(1) + "%" : "—"}</td>
+                  <td>${r.latest ? `<span class="badge ${statusClass(r.latest.status)}">${escapeHtml(r.latest.status)}</span>` : `<span class="muted-text">No entries</span>`}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        ` : `<p class="empty-state">No staff assigned to this branch yet.</p>`}
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><span class="eyebrow">Branch status</span><h3>Submission Breakdown</h3></div></div>
+        <div class="status-grid">${Object.entries(counts).map(([status, count]) => `<div><b>${count}</b><span>${status}</span></div>`).join("") || `<p class="empty-state">No branch entries yet.</p>`}</div>
+      </article>
     </section>
   `;
 }
@@ -628,14 +665,46 @@ function bqaDashboard(user) {
 function bmDashboard(user) {
   const reports = state.branchReports.filter((report) => report.branchId === user.branchId);
   const pending = reports.filter((report) => report.status === "Submitted to BM");
+  const allEntries = entriesVisibleTo(user);
+  const branchStaff = state.users.filter((u) => u.active && u.branchId === user.branchId);
+  const staffRows = branchStaff.map((u) => {
+    const uEntries = allEntries.filter((e) => e.userId === u.id);
+    const score = averageScore(uEntries);
+    return { user: u, count: uEntries.length, score };
+  }).sort((a, b) => b.score - a.score || b.count - a.count);
+
   return `
     <section class="metric-grid">
       ${metricCard("Pending Approval", pending.length, "Consolidated branch reports", Math.min(pending.length * 40, 100))}
       ${metricCard("Approved Reports", reports.filter((report) => report.status === "BM Approved").length, "Signed off by BM", 90)}
       ${metricCard("Returned Reports", reports.filter((report) => report.status === "BM Returned").length, "Needs BQA correction", 40)}
-      ${metricCard("Branch Score", `${averageScore(entriesVisibleTo(user)).toFixed(1)}%`, branchName(user.branchId), averageScore(entriesVisibleTo(user)))}
+      ${metricCard("Branch Score", `${averageScore(allEntries).toFixed(1)}%`, branchName(user.branchId), averageScore(allEntries))}
     </section>
-    <section class="panel"><div class="panel-heading"><div><span class="eyebrow">BM queue</span><h3>Reports Awaiting Review</h3></div></div>${branchReportsTable(reports, true)}</section>
+    <section class="content-grid">
+      <article class="panel wide">
+        <div class="panel-heading"><div><span class="eyebrow">${branchName(user.branchId)} · Team overview</span><h3>Branch Staff Performance</h3></div></div>
+        ${staffRows.length ? `
+          <div class="table-wrap">
+            <table class="leaderboard-table">
+              <thead><tr><th>#</th><th>Staff</th><th>Profile</th><th>Entries</th><th>Avg Score</th></tr></thead>
+              <tbody>
+                ${staffRows.map((r, i) => `<tr class="${r.score >= 90 && r.count ? "row-best" : r.score > 0 && r.score < 60 ? "row-worst" : ""}">
+                  <td><span class="rank-badge ${i === 0 ? "gold" : i === 1 ? "silver" : i === 2 ? "bronze" : ""}">${i + 1}</span></td>
+                  <td><b>${escapeHtml(r.user.name)}</b></td>
+                  <td><small>${escapeHtml(r.user.profile)}</small></td>
+                  <td>${r.count}</td>
+                  <td>${r.count ? r.score.toFixed(1) + "%" : "—"}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        ` : `<p class="empty-state">No staff assigned to this branch yet.</p>`}
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><span class="eyebrow">BM queue</span><h3>Reports Awaiting Review</h3></div></div>
+        ${branchReportsTable(reports, true)}
+      </article>
+    </section>
   `;
 }
 
@@ -734,16 +803,22 @@ function metricCard(label, value, note, percent) {
 }
 
 function captureView(user) {
+  const today = new Date().toISOString().slice(0, 10);
   const entryKpis = kpisForUser(user).filter((kpi) => kpi.scope === "Individual" || user.role !== "Staff");
+  const lockedToSelf = !isSuperRole(user.role);
   return `
     <section class="panel">
-      <div class="panel-heading"><div><span class="eyebrow">Daily workflow</span><h3>Daily KPI Capture</h3></div><span class="status-pill">Auto date/time enabled</span></div>
+      <div class="panel-heading"><div><span class="eyebrow">Daily workflow</span><h3>Daily KPI Capture</h3></div></div>
       <form class="entry-form" id="entryForm">
-        <label>Entry Date <input name="date" type="date" value="2026-05-18" required /></label>
-        <label>Staff <select name="userId">${staffOptions(user)}</select></label>
+        <label>Entry Date <input name="date" type="date" value="${today}" required /></label>
+        <label>Staff
+          ${lockedToSelf
+            ? `<input type="text" value="${escapeHtml(user.name)} · ${escapeHtml(user.profile)}" disabled style="background:var(--surface);color:var(--muted)" /><input type="hidden" name="userId" value="${user.id}" />`
+            : `<select name="userId">${staffOptions(user)}</select>`}
+        </label>
         <label>Branch <select name="branchId">${branchOptions(user)}</select></label>
-        ${entryKpis.map((kpi) => `<label>${kpi.name} <small>${kpi.scope} · ${kpi.frequency} · Target: ${targetForKpi(kpi, user)} ${kpi.unit}</small><input name="kpi-${kpi.id}" type="number" min="0" value="${targetForKpi(kpi, user)}" required /></label>`).join("")}
-        <label class="span-2">Evidence / Comment <textarea name="comment">Daily sales evidence attached and ready for BQA review.</textarea></label>
+        ${entryKpis.map((kpi) => `<label>${escapeHtml(kpi.name)} <small>${kpi.scope} · ${kpi.frequency} · Target: ${targetForKpi(kpi, user)} ${kpi.unit}</small><input name="kpi-${kpi.id}" type="number" min="0" value="" placeholder="0" required /></label>`).join("")}
+        <label class="span-2">Evidence / Comment <textarea name="comment" placeholder="Describe your daily activities and attach evidence for BQA review."></textarea></label>
         <button class="primary-action" type="submit">Submit for Validation</button>
       </form>
     </section>
@@ -752,12 +827,16 @@ function captureView(user) {
 }
 
 function staffOptions(user) {
-  const staff = ["Admin", "BQA", "BM"].includes(user.role) ? state.users.filter((item) => item.active && item.role === "Staff") : [user];
-  return staff.map((item) => `<option value="${item.id}">${item.name} · ${item.profile}</option>`).join("");
+  // Super/Admin can pick any active user; everyone else is locked to their own entry
+  if (isSuperRole(user.role)) {
+    return state.users.filter((u) => u.active).map((u) => `<option value="${u.id}">${u.name} · ${u.profile} · ${branchName(u.branchId)}</option>`).join("");
+  }
+  return `<option value="${user.id}" selected>${user.name} · ${user.profile}</option>`;
 }
 
 function branchOptions(user) {
-  const options = ["Admin"].includes(user.role) ? state.branches : state.branches.filter((branch) => branch.id === user.branchId);
+  // Super sees all branches; everyone else sees only their own branch
+  const options = isSuperRole(user.role) ? state.branches : state.branches.filter((branch) => branch.id === user.branchId);
   return options.map((branch) => `<option value="${branch.id}">${branch.code} · ${branch.name}</option>`).join("");
 }
 
@@ -890,6 +969,7 @@ function staffLeaderboard(entries) {
 function reportFiltersPanel(user) {
   const f = state.reportFilters || {};
   const isBigView = isSuperRole(user.role) || isZonalRole(user.role);
+  const isBranchRole = user.role === "BQA" || user.role === "BM";
   const active = [f.branches?.length, f.staffId, f.dateFrom, f.dateTo, f.status].filter(Boolean).length;
   return `
     <div class="filter-bar">
@@ -908,7 +988,14 @@ function reportFiltersPanel(user) {
         <label class="filter-label">Staff
           <select id="filterStaff" name="filterStaff">
             <option value="">All staff</option>
-            ${state.users.filter((u) => u.role === "Staff" && u.active).map((u) => `<option value="${u.id}" ${f.staffId === String(u.id) ? "selected" : ""}>${u.name} · ${u.profile}</option>`).join("")}
+            ${state.users.filter((u) => u.active).map((u) => `<option value="${u.id}" ${f.staffId === String(u.id) ? "selected" : ""}>${u.name} · ${u.profile}</option>`).join("")}
+          </select>
+        </label>` : ""}
+        ${isBranchRole ? `
+        <label class="filter-label">Staff
+          <select id="filterStaff" name="filterStaff">
+            <option value="">All branch staff</option>
+            ${state.users.filter((u) => u.active && u.branchId === user.branchId).map((u) => `<option value="${u.id}" ${f.staffId === String(u.id) ? "selected" : ""}>${u.name} · ${u.profile}</option>`).join("")}
           </select>
         </label>` : ""}
         <label class="filter-label">From
@@ -929,18 +1016,32 @@ function reportFiltersPanel(user) {
   `;
 }
 
+function branchKpiSummary(entries, user) {
+  const branchStaff = state.users.filter((u) => u.active && u.branchId === user.branchId);
+  const kpiRows = state.kpis.filter((k) => k.active && k.scope === "Individual").map((kpi) => {
+    const totalTarget = branchStaff.reduce((sum, u) => sum + targetForKpi(kpi, u), 0);
+    const totalActual = entries.reduce((sum, e) => sum + Number(e.values[kpi.id] || 0), 0);
+    const pct = totalTarget > 0 ? Math.min((totalActual / totalTarget) * 100, 150) : 0;
+    return { kpi, actual: totalActual, target: totalTarget, pct };
+  }).filter((r) => r.target > 0 || r.actual > 0);
+  if (!kpiRows.length) return `<p class="empty-state">No KPI data for this period.</p>`;
+  return `<div class="leaderboard">${kpiRows.map((row) => progressRow(row)).join("")}</div>`;
+}
+
 function reportsView(user) {
   const entries = filteredEntries(user);
   const kpiRows = summarizeKpis(entries);
   const top = kpiRows[0];
   const under = kpiRows.find((row) => row.actual < row.kpi.target);
   const showLeaderboards = isSuperRole(user.role) || isZonalRole(user.role);
+  const isBranchRole = user.role === "BQA" || user.role === "BM";
+  const scoreLabel = isBranchRole ? "Branch Avg Score" : "Zone Average Score";
   const periodLabel = `${state.reportPeriod} Report — ${new Date().toLocaleDateString("en-GB")}`;
   return `
     ${reportFiltersPanel(user)}
     <section class="panel" id="reportsPrintArea">
       <div class="panel-heading">
-        <div><span class="eyebrow">CRDB Bank · Coastal Zone</span><h3>${periodLabel}</h3></div>
+        <div><span class="eyebrow">CRDB Bank · Coastal Zone${isBranchRole ? ` · ${branchName(user.branchId)}` : ""}</span><h3>${periodLabel}</h3></div>
         <div class="report-toolbar">
           <div class="segmented">${["Daily", "Weekly", "Monthly", "Quarterly"].map((p) => `<button class="${state.reportPeriod === p ? "active" : ""}" data-report-period="${p}" type="button">${p}</button>`).join("")}</div>
           <div class="export-btns">
@@ -953,7 +1054,7 @@ function reportsView(user) {
 
       <section class="metric-grid">
         ${metricCard("Total Entries", entries.length, `${state.reportPeriod} period`, Math.min(entries.length * 25, 100))}
-        ${metricCard("Zone Average Score", `${averageScore(entries).toFixed(1)}%`, performanceCategory(averageScore(entries)), averageScore(entries))}
+        ${metricCard(scoreLabel, `${averageScore(entries).toFixed(1)}%`, performanceCategory(averageScore(entries)), averageScore(entries))}
         ${metricCard("Top KPI", top?.kpi.name || "—", top ? `${top.actual.toLocaleString()} captured` : "No data", 80)}
         ${metricCard("Below Target", under?.kpi.name || "—", under ? `${under.actual} captured` : "All on track", under ? 35 : 100)}
       </section>
@@ -967,6 +1068,19 @@ function reportsView(user) {
           <article class="panel flat">
             <div class="panel-heading"><div><span class="eyebrow">Staff Ranking</span><h3>Top Staff</h3></div></div>
             ${staffLeaderboard(entries)}
+          </article>
+        </div>
+      ` : ""}
+
+      ${isBranchRole ? `
+        <div class="content-grid">
+          <article class="panel flat">
+            <div class="panel-heading"><div><span class="eyebrow">Staff Performance · ${branchName(user.branchId)}</span><h3>Staff Leaderboard</h3></div></div>
+            ${staffLeaderboard(entries)}
+          </article>
+          <article class="panel flat">
+            <div class="panel-heading"><div><span class="eyebrow">KPI Targets vs Actuals · ${branchName(user.branchId)}</span><h3>Branch KPI Summary</h3></div></div>
+            ${branchKpiSummary(entries, user)}
           </article>
         </div>
       ` : ""}
@@ -1146,6 +1260,7 @@ function adminView(user) {
   const content = {
     users: `
       <div class="admin-panel-block">${adminUserCreateForm()}</div>
+      <div class="admin-panel-block">${bulkUserUploadPanel()}</div>
       <div class="admin-panel-block">${userManagementPanel()}</div>
     `,
     roles: `
@@ -1309,6 +1424,51 @@ function backupPanel() {
       <p class="body-copy">A snapshot is saved automatically before every state change. Restore from any of the last 3 checkpoints below.</p>
       ${snaps.length ? `<div class="backup-grid">${snaps.map((s) => `<div class="report-tile"><b>${s.label}</b><span>${s.users} users · ${s.entries} entries</span><button class="secondary-action" data-restore-backup="${s.key}" type="button" style="margin-top:8px">Restore</button></div>`).join("")}</div>` : `<p class="empty-state">No backups yet — they appear after the first data change.</p>`}
     </section>
+  `;
+}
+
+function bulkUserUploadPanel() {
+  const preview = state.bulkPreview;
+  const validCount = preview ? preview.rows.filter((r) => !r.error).length : 0;
+  return `
+    <div class="panel-heading"><div><span class="eyebrow">Import Users</span><h3>Bulk User Upload (Excel / CSV)</h3></div></div>
+    <p class="body-copy">Upload an Excel (.xlsx) or CSV file. Required columns: <b>Staff Name</b>, <b>Phone Number</b>, <b>Role</b>, <b>Profile</b>, <b>Branch</b> (sort code or branch name).</p>
+    <div class="entry-form" style="max-width:520px">
+      <label>Select File
+        <input type="file" id="bulkUploadFile" accept=".xlsx,.xls,.csv" />
+      </label>
+      <button class="secondary-action" id="bulkParseBtn" type="button">Preview Import</button>
+    </div>
+    ${preview ? `
+      <div style="margin-top:1.5rem">
+        <div class="panel-heading"><div><span class="eyebrow">${preview.rows.length} row${preview.rows.length !== 1 ? "s" : ""} parsed</span><h3>Import Preview</h3></div></div>
+        ${(preview.rows.filter((r) => r.error).length) ? `<p class="danger-note" style="display:block;margin-bottom:12px">⚠ ${preview.rows.filter((r) => r.error).length} row(s) have issues (shown in red) — they will be skipped during import.</p>` : `<p class="success-note">All rows look good — ready to import.</p>`}
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Name</th><th>Phone</th><th>Role</th><th>Profile</th><th>Branch</th><th>Status</th></tr></thead>
+            <tbody>
+              ${preview.rows.map((row, i) => `<tr class="${row.error ? "row-worst" : ""}">
+                <td>${i + 1}</td>
+                <td>${escapeHtml(row.name || "—")}</td>
+                <td>${escapeHtml(row.phone || "—")}</td>
+                <td>${escapeHtml(row.role || "—")}</td>
+                <td>${escapeHtml(row.profile || "—")}</td>
+                <td>${escapeHtml(row.branchDisplay || "—")}</td>
+                <td>${row.error
+                  ? `<span class="badge rejected" title="${escapeHtml(row.error)}">⚠ ${escapeHtml(row.error)}</span>`
+                  : `<span class="badge bqa-approved">Ready</span>`}</td>
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+        <div style="display:flex;gap:12px;margin-top:14px;flex-wrap:wrap">
+          <button class="primary-action" id="bulkImportBtn" type="button" ${validCount ? "" : "disabled"}>
+            Import ${validCount} Valid User${validCount !== 1 ? "s" : ""}
+          </button>
+          <button class="secondary-action" id="bulkClearBtn" type="button">Clear Preview</button>
+        </div>
+      </div>
+    ` : ""}
   `;
 }
 
@@ -1752,9 +1912,11 @@ function bindEvents() {
   });
 
   document.querySelector("[data-action='apply-filters']")?.addEventListener("click", () => {
-    const isBigView = isSuperRole(activeUser()?.role) || isZonalRole(activeUser()?.role);
+    const user = activeUser();
+    const isBigView = isSuperRole(user?.role) || isZonalRole(user?.role);
+    const isBranchRole = user?.role === "BQA" || user?.role === "BM";
     const branch = isBigView ? document.querySelector("#filterBranch")?.value : "";
-    const staff  = isBigView ? document.querySelector("#filterStaff")?.value  : "";
+    const staff  = (isBigView || isBranchRole) ? document.querySelector("#filterStaff")?.value : "";
     const from   = document.querySelector("#filterDateFrom")?.value || "";
     const to     = document.querySelector("#filterDateTo")?.value   || "";
     const status = document.querySelector("#filterStatus")?.value   || "";
@@ -1793,6 +1955,112 @@ function bindEvents() {
     saveState();
     render();
     showSuccessModal("Access control saved", "Module permissions have been updated for all roles.");
+  });
+
+  // Bulk user upload — parse file into preview
+  document.querySelector("#bulkParseBtn")?.addEventListener("click", () => {
+    const fileInput = document.querySelector("#bulkUploadFile");
+    const file = fileInput?.files?.[0];
+    if (!file) return alert("Please select an Excel (.xlsx) or CSV file first.");
+    if (typeof XLSX === "undefined") return alert("Excel parser not loaded. Check your internet connection and refresh.");
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+        if (raw.length < 2) {
+          state.bulkPreview = { rows: [{ name: "", phone: "", role: "", profile: "", branchDisplay: "", error: "File is empty or has no data rows" }] };
+          render(); return;
+        }
+
+        const header = raw[0].map((h) => String(h).toLowerCase().trim());
+        const col = (keywords) => header.findIndex((h) => keywords.some((k) => h.includes(k)));
+        const nameIdx   = col(["staff name", "name"]);
+        const phoneIdx  = col(["phone"]);
+        const roleIdx   = col(["role"]);
+        const profileIdx = col(["profile"]);
+        const branchIdx = col(["branch"]);
+
+        const rows = raw.slice(1).filter((r) => r.some((c) => String(c).trim())).map((row) => {
+          const name       = String(row[nameIdx]    ?? "").trim();
+          const phone      = normalizePhone(String(row[phoneIdx]   ?? "").trim());
+          const role       = String(row[roleIdx]    ?? "").trim();
+          const profile    = String(row[profileIdx] ?? "").trim();
+          const branchRaw  = String(row[branchIdx]  ?? "").trim();
+
+          let error = null;
+          if (!name)                                        error = "Name missing";
+          else if (!phone || phone.length < 9)              error = "Invalid phone";
+          else if (!state.roleCatalog.find((r) => r.key === role)) error = `Unknown role: ${role || "(blank)"}`;
+          else if (state.users.some((u) => normalizePhone(u.phone) === phone)) error = "Phone already registered";
+          else if (state.users.some((u) => u.name.toLowerCase() === name.toLowerCase())) error = "Name already registered";
+
+          let branchId = "zonal";
+          let branchDisplay = "Zonal";
+          if (!isZonalRole(role) && !isSuperRole(role)) {
+            const found = state.branches.find((b) =>
+              b.code === branchRaw ||
+              b.id === branchRaw ||
+              b.name.toLowerCase() === branchRaw.toLowerCase()
+            );
+            if (found) { branchId = found.id; branchDisplay = `${found.code} · ${found.name}`; }
+            else if (!error) { error = `Branch not found: ${branchRaw || "(blank)"}`; branchDisplay = branchRaw || "—"; }
+            else              { branchDisplay = branchRaw || "—"; }
+          }
+
+          return { name, phone, role, profile, branchId, branchDisplay, error };
+        });
+
+        state.bulkPreview = { rows };
+        saveState();
+        render();
+      } catch (err) {
+        alert("Failed to parse file: " + (err.message || String(err)));
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+
+  // Bulk user upload — import valid rows
+  document.querySelector("#bulkImportBtn")?.addEventListener("click", () => {
+    const preview = state.bulkPreview;
+    if (!preview) return;
+    const valid = preview.rows.filter((r) => !r.error);
+    if (!valid.length) return;
+
+    let nextId = Math.max(0, ...state.users.map((u) => u.id)) + 1;
+    valid.forEach((row) => {
+      const password = createRandomPassword();
+      state.users.push({
+        id: nextId++,
+        staffNo: `USR${String(state.users.length + 1).padStart(3, "0")}`,
+        name: row.name,
+        phone: row.phone,
+        password,
+        role: row.role,
+        profile: row.profile,
+        branchId: row.branchId,
+        active: true,
+        mustChangePassword: true
+      });
+    });
+
+    const count = valid.length;
+    state.bulkPreview = null;
+    addAudit("Bulk user import", `${count} users`, "Imported via Excel upload");
+    saveState();
+    render();
+    showSuccessModal("Import complete", `${count} user${count !== 1 ? "s" : ""} created successfully. Each user will be prompted to set their password on first login.`);
+  });
+
+  // Bulk user upload — clear preview
+  document.querySelector("#bulkClearBtn")?.addEventListener("click", () => {
+    state.bulkPreview = null;
+    saveState();
+    render();
   });
 }
 
@@ -1846,7 +2114,7 @@ function createBranchReport() {
     const report = {
       id: Date.now(),
       branchId: user.branchId,
-      date: "2026-05-18",
+      date: new Date().toISOString().slice(0, 10),
       entryIds: approved.map((entry) => entry.id),
       status: "Submitted to BM",
       bqaComment: comment,
