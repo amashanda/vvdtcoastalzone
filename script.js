@@ -524,7 +524,7 @@ function appShell(user) {
         <div class="sidebar-panel">
           <span>Logged in as</span>
           <strong>${user.role} ${roleTypeBadge}</strong>
-          <small>${user.name} · ${branchName(user.branchId)}</small>
+          <small>${escapeHtml(user.name)} · ${escapeHtml(branchName(user.branchId))}</small>
         </div>
       </aside>
       <main>
@@ -708,27 +708,6 @@ function bmDashboard(user) {
   `;
 }
 
-function adminDashboard(user) {
-  const entries = entriesVisibleTo(user);
-  return `
-    <section class="metric-grid">
-      ${metricCard("Zone Score", `${averageScore(entries).toFixed(1)}%`, "All visible records", averageScore(entries))}
-      ${metricCard("Users", state.users.length, "Active demo users", 100)}
-      ${metricCard("Branches", state.branches.length, "Sort-code register", 100)}
-      ${metricCard("BM Reports", state.branchReports.length, "Branch consolidations", 75)}
-    </section>
-    <section class="content-grid">
-      <article class="panel wide"><div class="panel-heading"><div><span class="eyebrow">Administration</span><h3>Operational Summary</h3></div></div><div class="report-grid">
-        <div class="report-tile"><b>Access Control</b><span>Assign modules per role in Admin Setup.</span></div>
-        <div class="report-tile"><b>Reports</b><span>Daily, weekly, monthly, and quarterly reporting enabled.</span></div>
-        <div class="report-tile"><b>Audit</b><span>${state.auditLogs.length} tracked actions.</span></div>
-        <div class="report-tile"><b>Demo Access</b><span>Credentials available only in Admin Setup.</span></div>
-      </div></article>
-      <article class="panel"><div class="panel-heading"><div><span class="eyebrow">Status</span><h3>Entry Breakdown</h3></div></div><div class="attention-list">${Object.entries(statusCounts(entries)).map(([status, count]) => `<div><b>${count}</b><span>${status}</span></div>`).join("")}</div></article>
-    </section>
-  `;
-}
-
 function zonalDashboard(user) {
   const allEntries = entriesVisibleTo(user);
   const allStaff = state.users.filter((u) => u.active && (u.role === "Staff" || u.role === "BQA" || u.role === "BM"));
@@ -817,7 +796,7 @@ function captureView(user) {
             : `<select name="userId">${staffOptions(user)}</select>`}
         </label>
         <label>Branch <select name="branchId">${branchOptions(user)}</select></label>
-        ${entryKpis.map((kpi) => `<label>${escapeHtml(kpi.name)} <small>${kpi.scope} · ${kpi.frequency} · Target: ${targetForKpi(kpi, user)} ${kpi.unit}</small><input name="kpi-${kpi.id}" type="number" min="0" value="" placeholder="0" required /></label>`).join("")}
+        ${entryKpis.map((kpi) => `<label>${escapeHtml(kpi.name)} <small>${escapeHtml(kpi.scope)} · ${escapeHtml(kpi.frequency)} · Target: ${targetForKpi(kpi, user)} ${escapeHtml(kpi.unit)}</small><input name="kpi-${kpi.id}" type="number" min="0" max="99999" step="1" value="" placeholder="0" required /></label>`).join("")}
         <label class="span-2">Evidence / Comment <textarea name="comment" placeholder="Describe your daily activities and attach evidence for BQA review."></textarea></label>
         <button class="primary-action" type="submit">Submit for Validation</button>
       </form>
@@ -867,9 +846,9 @@ function entriesTable(entries, showActions) {
           const score = scoreEntry(entry);
           return `<tr>
             <td>${entry.date}</td>
-            <td>${entryUser?.name || "Unknown"}<br><small>${entryUser?.profile || ""}</small></td>
-            <td>${branchName(entry.branchId)}</td>
-            <td><span class="badge ${statusClass(entry.status)}">${entry.status}</span><br><small>${entry.comment || ""}</small></td>
+            <td>${escapeHtml(entryUser?.name || "Unknown")}<br><small>${escapeHtml(entryUser?.profile || "")}</small></td>
+            <td>${escapeHtml(branchName(entry.branchId))}</td>
+            <td><span class="badge ${statusClass(entry.status)}">${escapeHtml(entry.status)}</span><br><small>${escapeHtml(entry.comment || "")}</small></td>
             <td>${score.finalIndex.toFixed(1)}%</td>
             ${showActions ? `<td>${entry.status === "Submitted" || entry.status === "Returned with Comments" ? entryActions(entry.id) : "Closed"}</td>` : ""}
           </tr>`;
@@ -902,7 +881,7 @@ function branchReportsTable(reports, showActions) {
           const entries = state.entries.filter((entry) => report.entryIds.includes(entry.id));
           return `<tr>
             <td>${report.date}</td><td>${branchName(report.branchId)}</td><td>${report.entryIds.length}</td>
-            <td><span class="badge ${statusClass(report.status)}">${report.status}</span><br><small>${report.bmComment || report.bqaComment || ""}</small></td>
+            <td><span class="badge ${statusClass(report.status)}">${escapeHtml(report.status)}</span><br><small>${escapeHtml(report.bmComment || report.bqaComment || "")}</small></td>
             <td>${averageScore(entries).toFixed(1)}%</td>
             ${showActions ? `<td>${report.status === "Submitted to BM" ? `<button class="mini-action" data-report-status="${report.id}:BM Approved" type="button">Approve</button> <button class="mini-action muted" data-report-status="${report.id}:BM Returned" type="button">Return</button>` : "Closed"}</td>` : ""}
           </tr>`;
@@ -1169,7 +1148,7 @@ function exportPDF() {
 }
 
 function auditView() {
-  return `<section class="panel"><div class="panel-heading"><div><span class="eyebrow">Admin only</span><h3>Audit Trail</h3></div></div><div class="timeline">${state.auditLogs.map((log) => `<div><b>${log.action}</b><span>${log.actor} · ${log.entity} · ${log.time}${log.note ? ` · ${log.note}` : ""}</span></div>`).join("")}</div></section>`;
+  return `<section class="panel"><div class="panel-heading"><div><span class="eyebrow">Admin only</span><h3>Audit Trail</h3></div></div><div class="timeline">${state.auditLogs.map((log) => `<div><b>${escapeHtml(log.action)}</b><span>${escapeHtml(log.actor)} · ${escapeHtml(log.entity)} · ${escapeHtml(log.time)}${log.note ? ` · ${escapeHtml(log.note)}` : ""}</span></div>`).join("")}</div></section>`;
 }
 
 function adminUserCreateForm() {
@@ -1226,10 +1205,10 @@ function userManagementPanel() {
         <thead><tr><th>Name</th><th>Phone</th><th>Role · Profile</th><th>Branch</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
           ${state.users.map((u) => `<tr class="${!u.active ? "row-disabled" : ""}">
-            <td><b>${u.name}</b><br><small>${u.staffNo}</small></td>
-            <td>${u.phone}</td>
-            <td><span class="badge ${u.role === "Admin" ? "bm-approved" : "submitted"}">${u.role}</span> <small>${u.profile}</small></td>
-            <td><small>${branchName(u.branchId)}</small></td>
+            <td><b>${escapeHtml(u.name)}</b><br><small>${escapeHtml(u.staffNo)}</small></td>
+            <td>${escapeHtml(u.phone)}</td>
+            <td><span class="badge ${u.role === "Admin" ? "bm-approved" : "submitted"}">${escapeHtml(u.role)}</span> <small>${escapeHtml(u.profile)}</small></td>
+            <td><small>${escapeHtml(branchName(u.branchId))}</small></td>
             <td><span class="badge ${u.active ? "bqa-approved" : "rejected"}">${u.active ? "Active" : "Disabled"}</span>${u.mustChangePassword ? ' <span class="badge returned-with-comments" title="Must change password">PW</span>' : ""}</td>
             <td class="action-cell">
               ${u.id === me?.id ? '<small class="muted-text">You</small>' : `
@@ -1384,10 +1363,10 @@ function branchManagementPanel() {
     }
     const assigned = state.users.filter((u) => u.branchId === branch.id).length;
     return `<tr>
-      <td><strong>${branch.code}</strong></td>
-      <td>${branch.name}</td>
-      <td>${branch.classification}</td>
-      <td>${branch.location}</td>
+      <td><strong>${escapeHtml(branch.code)}</strong></td>
+      <td>${escapeHtml(branch.name)}</td>
+      <td>${escapeHtml(branch.classification)}</td>
+      <td>${escapeHtml(branch.location)}</td>
       <td><span class="badge bqa-approved">Active</span><small style="display:block;color:var(--muted)">${assigned} user${assigned !== 1 ? "s" : ""}</small></td>
       <td>
         <button class="mini-action muted" data-edit-branch="${branch.id}" type="button">Edit</button>
@@ -1657,6 +1636,20 @@ function bindEvents() {
   document.querySelector("#entryForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+
+    // P1-01: one entry per staff per day
+    const submittingUserId = Number(form.get("userId"));
+    const submittingDate   = form.get("date");
+    const isDuplicate = state.entries.some(
+      (e) => e.userId === submittingUserId && e.date === submittingDate
+    );
+    if (isDuplicate) {
+      return showSuccessModal(
+        "Duplicate entry",
+        "An entry already exists for this staff member on this date. Each person may submit once per day."
+      );
+    }
+
     const values = {};
     kpisForUser(activeUser()).forEach((kpi) => {
       if (form.has(`kpi-${kpi.id}`)) values[kpi.id] = Number(form.get(`kpi-${kpi.id}`) || 0);

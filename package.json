@@ -1,17 +1,17 @@
 {
   "name": "vvdt-coastal-zone",
-  "version": "1.0.0",
-  "private": true,
-  "description": "Standalone VVDT web rollout prototype for CRDB Bank Coastal Zone.",
+  "version": "2.0.0",
+  "type": "module",
   "scripts": {
-    "check": "node --check script.js",
-    "serve": "python3 -m http.server 4173"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
   },
-  "keywords": [
-    "vvdt",
-    "crdb",
-    "coastal-zone",
-    "kpi-dashboard"
-  ],
-  "license": "UNLICENSED"
+  "dependencies": {
+    "firebase": "^10.12.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "vite": "^5.3.1"
+  }
 }

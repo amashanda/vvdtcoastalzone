@@ -8,35 +8,42 @@ A mobile-first, single-page web application for daily KPI capture, BQA validatio
 ## Quick Start
 
 ```bash
-# Open locally — no install required
-open index.html
+# Install dependencies (Node 20+ required)
+npm install
 
-# Or serve via Python for correct module loading
-python3 -m http.server 4173
-# then visit http://localhost:4173
+# Copy the env template and fill in your Firebase project values
+cp .env.example .env
+# edit .env with real VITE_FIREBASE_* values (never commit .env)
 
-# Check JS syntax
-node --check script.js
-```
+# Start local dev server
+npm run dev
+# then visit http://localhost:5173/vvdtcoastalzone/
 
-**Firebase credentials** — copy the template and fill in your project values:
-```bash
-cp firebase-config.example.js firebase-config.js
-# edit firebase-config.js with real values (never commit it)
+# Production build
+npm run build        # outputs to dist/
+npm run preview      # preview the built output locally
 ```
 
 ---
 
 ## Demo Logins
 
-| Role | Phone | Password | Access |
-|------|-------|----------|--------|
-| Admin | 255700000001 | Admin@2026 | Full — all modules |
-| Staff | 255700000002 | Staff@2026 | Dashboard, Capture |
-| BQA | 255700000003 | Bqa@2026 | Dashboard, Capture, Validation, Reports |
-| BM | 255700000004 | Bm@2026 | Dashboard, BM Review, Reports |
-| ZBM | 255700000005 | Zbm@2026 | Dashboard, Reports |
-| ZM | 255700000006 | Zm@2026 | Dashboard, Reports |
+> ⚠️ **Security notice:** Plaintext passwords have been removed from this file.
+> Do not commit credentials to source control.
+> After completing the Firebase Auth migration, users log in with their phone number
+> and the password set at account creation — no seed credentials are hardcoded.
+
+| Role | Phone | Access |
+|------|-------|--------|
+| Admin | 255700000001 | Full — all modules |
+| Staff | 255700000002 | Dashboard, Capture |
+| BQA | 255700000003 | Dashboard, Capture, Validation, Reports |
+| BM | 255700000004 | Dashboard, BM Review, Reports |
+| ZBM | 255700000005 | Dashboard, Reports |
+| ZM | 255700000006 | Dashboard, Reports |
+
+To run locally with seed data, load the app and use the Quick Signup form,
+or ask the Admin to create accounts via Admin → Users.
 
 ---
 
