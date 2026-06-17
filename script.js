@@ -27,7 +27,7 @@ const defaultRolePermissions = {
   Staff: ["dashboard", "capture"],
   BQA: ["dashboard", "capture", "validation", "reports"],
   BM: ["dashboard", "bmReview", "reports"],
-  ZBM: ["dashboard", "reports"],
+  ZBM: ["dashboard", "capture", "validation", "bmReview", "reports", "audit"],
   ZM: ["dashboard", "reports"],
   HRBP: ["dashboard", "reports", "audit"],
   ZQA: ["dashboard", "validation", "reports"],
