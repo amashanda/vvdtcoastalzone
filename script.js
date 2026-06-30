@@ -1,5 +1,34 @@
+import { auth, db } from './src/firebase.js';
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+} from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+
 const STORAGE_KEY = "vvdt-rollout-state-v4";
 const BACKUP_KEYS = ["vvdt-backup-1", "vvdt-backup-2", "vvdt-backup-3"];
+
+// Rate limiting: max 5 login attempts per 10 minutes per phone number
+const _loginAttempts = new Map();
+function checkRateLimit(phone) {
+  const now = Date.now();
+  const rec = _loginAttempts.get(phone) || { count: 0, firstAt: now };
+  if (now - rec.firstAt > 600000) {
+    _loginAttempts.set(phone, { count: 1, firstAt: now });
+    return { ok: true };
+  }
+  if (rec.count >= 5) {
+    const wait = Math.ceil((rec.firstAt + 600000 - now) / 60000);
+    return { ok: false, wait };
+  }
+  _loginAttempts.set(phone, { count: rec.count + 1, firstAt: rec.firstAt });
+  return { ok: true };
+}
+function resetRateLimit(phone) { _loginAttempts.delete(phone); }
 
 const MODULES = [
   { key: "dashboard", label: "Dashboard" },
@@ -138,6 +167,23 @@ const baseState = {
 
 let state = loadState();
 
+// Session inactivity timeout — 15 minutes
+let _lastActivity = Date.now();
+const SESSION_MS = 15 * 60 * 1000;
+['click', 'keydown', 'scroll', 'touchstart'].forEach((evt) =>
+  document.addEventListener(evt, () => { _lastActivity = Date.now(); }, { passive: true })
+);
+setInterval(() => {
+  if (state.activeUserId && Date.now() - _lastActivity > SESSION_MS) {
+    if (auth) signOut(auth).catch(() => {});
+    state.activeUserId = null;
+    state.authMode = 'login';
+    saveState();
+    render();
+    showSuccessModal('Session expired', 'You were logged out after 15 minutes of inactivity.');
+  }
+}, 60000);
+
 function loadState() {
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -173,45 +219,40 @@ function loadState() {
 
 async function saveState() {
   try {
-    // Keep existing browser storage for safety during migration
     const current = localStorage.getItem(STORAGE_KEY);
-
     if (current) {
       const b1 = localStorage.getItem(BACKUP_KEYS[0]);
       const b2 = localStorage.getItem(BACKUP_KEYS[1]);
-
       if (b2) localStorage.setItem(BACKUP_KEYS[2], b2);
       if (b1) localStorage.setItem(BACKUP_KEYS[1], b1);
-
       localStorage.setItem(BACKUP_KEYS[0], current);
     }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(state)
-    );
-
-    // New cloud backup
-    if (window.db) {
-      await window.addDoc(
-        window.collection(window.db, "backups"),
-        {
-          savedAt: new Date().toISOString(),
-          users: state.users,
-          entries: state.entries,
-          branchReports: state.branchReports,
-          auditLogs: state.auditLogs
-        }
-      );
-
-      console.log("Saved to Firestore");
+    // Sync role permissions to Firestore so all devices stay in sync
+    if (db) {
+      setDoc(doc(db, 'config', 'rolePermissions'), {
+        permissions: state.rolePermissions,
+        catalog: state.roleCatalog,
+        updatedAt: new Date().toISOString(),
+      }).catch((err) => console.error('Firestore role sync failed:', err));
     }
-
   } catch (err) {
-    console.error(
-      "Save failed:",
-      err
-    );
+    console.error('Save failed:', err);
+  }
+}
+
+async function loadRolePermissionsFromFirestore() {
+  if (!db) return;
+  try {
+    const snap = await getDoc(doc(db, 'config', 'rolePermissions'));
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data.permissions) state.rolePermissions = data.permissions;
+      if (data.catalog) state.roleCatalog = data.catalog;
+    }
+  } catch (err) {
+    console.error('Firestore role load failed:', err);
   }
 }
 
@@ -1306,10 +1347,10 @@ function roleManagementPanel() {
         <thead><tr><th>Role</th><th>Profile Group</th><th>Modules</th><th></th></tr></thead>
         <tbody>
           ${catalog.map((role) => `<tr>
-            <td><strong>${role.label}</strong>${role.locked ? ` <span class="badge bqa-approved">System</span>` : ""}</td>
+            <td><strong>${escapeHtml(role.label)}</strong>${role.locked ? ` <span class="badge bqa-approved">System</span>` : ""}</td>
             <td><span class="role-type-badge ${role.type === "Zonal" ? "zonal" : role.type === "Super" ? "super" : "branch"}">${role.type === "Super" ? "Super" : role.type === "Zonal" ? "Zonal Staff" : "Branch Staff"}</span></td>
-            <td><small>${(state.rolePermissions[role.key] || []).join(", ") || "None"}</small></td>
-            <td>${role.locked ? "" : `<button class="mini-action danger" data-delete-role="${role.key}" type="button">Delete</button>`}</td>
+            <td><small>${(state.rolePermissions[role.key] || []).map(escapeHtml).join(", ") || "None"}</small></td>
+            <td>${role.locked ? "" : `<button class="mini-action danger" data-delete-role="${escapeHtml(role.key)}" type="button">Delete</button>`}</td>
           </tr>`).join("")}
         </tbody>
       </table>
@@ -1522,7 +1563,7 @@ function changePasswordModal() {
   `;
   document.body.appendChild(el);
   document.querySelector("#voluntaryPwCancel")?.addEventListener("click", () => el.remove());
-  document.querySelector("#voluntaryPwForm")?.addEventListener("submit", (event) => {
+  document.querySelector("#voluntaryPwForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const user = activeUser();
@@ -1531,7 +1572,15 @@ function changePasswordModal() {
     if (form.get("currentPw") !== user.password) return showErr("Current password is incorrect.");
     if (!isSimplePasswordValid(form.get("newPw"))) return showErr("New password must be at least 6 characters.");
     if (form.get("newPw") !== form.get("confirmPw")) return showErr("New passwords do not match.");
-    state.users = state.users.map((u) => u.id === user.id ? { ...u, password: form.get("newPw") } : u);
+    const newPw = String(form.get("newPw"));
+    if (auth?.currentUser) {
+      try {
+        const cred = EmailAuthProvider.credential(normalizePhone(user.phone) + "@vvdt.app", form.get("currentPw"));
+        await reauthenticateWithCredential(auth.currentUser, cred);
+        await updatePassword(auth.currentUser, newPw);
+      } catch (_) {}
+    }
+    state.users = state.users.map((u) => u.id === user.id ? { ...u, password: newPw } : u);
     addAudit("Password changed voluntarily", user.phone);
     saveState();
     el.remove();
@@ -1540,7 +1589,7 @@ function changePasswordModal() {
 }
 
 function bindEvents() {
-  document.querySelector("#changePasswordForm")?.addEventListener("submit", (event) => {
+  document.querySelector("#changePasswordForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const newPw = String(form.get("newPw")).trim();
@@ -1549,6 +1598,9 @@ function bindEvents() {
     const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; } };
     if (!isSimplePasswordValid(newPw)) return showErr("Password must be at least 6 characters.");
     if (newPw !== confirmPw) return showErr("Passwords do not match.");
+    if (auth?.currentUser) {
+      try { await updatePassword(auth.currentUser, newPw); } catch (_) {}
+    }
     state.users = state.users.map((u) => u.id === state.activeUserId ? { ...u, password: newPw, mustChangePassword: false } : u);
     addAudit("Password changed", activeUser()?.phone || "");
     saveState();
@@ -1573,25 +1625,63 @@ function bindEvents() {
     });
   });
 
-  document.querySelector("#loginForm")?.addEventListener("submit", (event) => {
+  document.querySelector("#loginForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const phone = normalizePhone(form.get("phone"));
-    const user = state.users.find((item) => normalizePhone(item.phone) === phone && item.password === form.get("password") && item.active);
-    if (!user) {
-      const errEl = document.querySelector("#loginError");
-      if (errEl) { errEl.textContent = "Incorrect phone number or password, or account is inactive."; errEl.style.display = "block"; }
+    const password = String(form.get("password"));
+    const errEl = document.querySelector("#loginError");
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; } };
+    if (errEl) errEl.style.display = "none";
+
+    const rate = checkRateLimit(phone);
+    if (!rate.ok) {
+      showErr(`Too many failed attempts. Try again in ${rate.wait} minute${rate.wait !== 1 ? "s" : ""}.`);
       return;
     }
-    state.activeUserId = user.id;
+
+    const localUser = state.users.find((u) => normalizePhone(u.phone) === phone && u.active);
+
+    if (auth) {
+      const email = phone + "@vvdt.app";
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+        // Firebase Auth succeeded
+      } catch (fbErr) {
+        const notFound = fbErr.code === "auth/user-not-found" || fbErr.code === "auth/invalid-credential" || fbErr.code === "auth/invalid-email";
+        if (notFound && localUser && localUser.password === password) {
+          // Transparent migration: create Firebase Auth account on first login
+          try { await createUserWithEmailAndPassword(auth, email, password); } catch (_) {}
+        } else {
+          showErr("Incorrect phone number or password, or account is inactive.");
+          return;
+        }
+      }
+    } else {
+      // No Firebase — fall back to local password check
+      if (!localUser || localUser.password !== password) {
+        showErr("Incorrect phone number or password, or account is inactive.");
+        return;
+      }
+    }
+
+    if (!localUser) {
+      showErr("Account not found. Contact your administrator.");
+      if (auth) signOut(auth).catch(() => {});
+      return;
+    }
+
+    resetRateLimit(phone);
+    _lastActivity = Date.now();
+    state.activeUserId = localUser.id;
     state.activeView = "dashboard";
     state.generatedPassword = null;
-    addAudit("User logged in", user.phone);
+    addAudit("User logged in", localUser.phone);
     saveState();
     render();
   });
 
-  document.querySelector("#signupForm")?.addEventListener("submit", (event) => {
+  document.querySelector("#signupForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const phone = normalizePhone(form.get("phone"));
@@ -1602,6 +1692,11 @@ function bindEvents() {
     if (state.users.some((u) => normalizePhone(u.phone) === phone)) return showErr(`An account with phone number ${phone} already exists. Please log in instead.`);
     if (state.users.some((u) => u.name.toLowerCase() === name.toLowerCase())) return showErr(`The name "${name}" is already registered. Contact your Admin if you need access.`);
     const user = createUser(form, "Staff");
+    if (auth) {
+      try {
+        await createUserWithEmailAndPassword(auth, phone + "@vvdt.app", user.password);
+      } catch (_) {}
+    }
     state.generatedPassword = { phone: user.phone, password: user.password };
     state.authMode = "signup";
     addAudit("Quick signup created", user.phone);
@@ -1619,10 +1714,11 @@ function bindEvents() {
 
   document.querySelector("[data-action='changepw']")?.addEventListener("click", () => changePasswordModal());
 
-  document.querySelector("[data-action='logout']")?.addEventListener("click", () => {
+  document.querySelector("[data-action='logout']")?.addEventListener("click", async () => {
     addAudit("User logged out", activeUser()?.phone || "Unknown");
     state.activeUserId = null;
     state.authMode = "login";
+    if (auth) try { await signOut(auth); } catch (_) {}
     saveState();
     render();
   });
@@ -2150,3 +2246,5 @@ function updateReportStatus(id, status) {
 }
 
 render();
+// Load role permissions from Firestore so cross-device changes take effect immediately
+loadRolePermissionsFromFirestore().then(render);
