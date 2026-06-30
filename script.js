@@ -1649,27 +1649,24 @@ function bindEvents() {
 
     const localUser = state.users.find((u) => normalizePhone(u.phone) === phone && u.active);
 
+    // Always validate against local password first
+    const storedPw = _runtimePasswords.get(localUser?.id);
+    if (!localUser || storedPw !== password) {
+      showErr("Incorrect phone number or password.");
+      return;
+    }
+
     if (auth) {
       const email = phone + "@vvdt.app";
       try {
         await signInWithEmailAndPassword(auth, email, password);
       } catch (fbErr) {
-        const notFound = fbErr.code === "auth/user-not-found" || fbErr.code === "auth/invalid-credential" || fbErr.code === "auth/invalid-email";
-        const storedPw = _runtimePasswords.get(localUser?.id);
-        if (notFound && localUser && storedPw === password) {
-          // Transparent migration: create Firebase Auth account on first login
+        // User not in Firebase yet — create account transparently on first login
+        const isNewUser = fbErr.code === "auth/user-not-found" || fbErr.code === "auth/invalid-credential";
+        if (isNewUser) {
           try { await createUserWithEmailAndPassword(auth, email, password); } catch (_) {}
-        } else {
-          showErr("Incorrect phone number or password.");
-          return;
         }
-      }
-    } else {
-      // No Firebase — fall back to runtime password check
-      const storedPw = _runtimePasswords.get(localUser?.id);
-      if (!localUser || storedPw !== password) {
-        showErr("Incorrect phone number or password.");
-        return;
+        // Any other Firebase error (operation-not-allowed, network, etc.) — allow local login
       }
     }
 
