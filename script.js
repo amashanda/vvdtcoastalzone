@@ -474,7 +474,6 @@ function render() {
 }
 
 function authScreen() {
-  const loginActive = state.authMode === "login";
   return `
     <main class="auth-page">
       <section class="auth-hero image-hero">
@@ -488,11 +487,7 @@ function authScreen() {
       </section>
 
       <section class="auth-card minimal">
-        <div class="auth-tabs">
-          <button class="${loginActive ? "active" : ""}" data-auth-mode="login" type="button">Login</button>
-          <button class="${!loginActive ? "active" : ""}" data-auth-mode="signup" type="button">Quick Signup</button>
-        </div>
-        ${loginActive ? loginForm() : signupForm()}
+        ${loginForm()}
       </section>
     </main>
   `;
@@ -510,28 +505,6 @@ function loginForm() {
   `;
 }
 
-function signupForm() {
-  return `
-    <form class="auth-form" id="signupForm">
-      <label>Full Name <input name="name" placeholder="Full name" required autocomplete="name" /></label>
-      <label>Phone Number <input name="phone" inputmode="tel" placeholder="255700XXXXXX" required autocomplete="username" /></label>
-      <label>Staff Profile
-        <select name="profile">
-          ${["MBB", "RO", "MCE", "TL", "Premier RM", "SSO", "Freelancer", "Digital Champion"].map((profile) => `<option>${profile}</option>`).join("")}
-        </select>
-      </label>
-      <label>Branch
-        <select name="branchId">
-          ${state.branches.map((branch) => `<option value="${branch.id}">${branch.code} · ${branch.name}</option>`).join("")}
-        </select>
-      </label>
-      <p id="signupError" class="danger-note" style="display:none"></p>
-      <button class="primary-action" type="submit">Create Staff Account</button>
-      ${state.generatedPassword ? `<p class="success-note">Account created — share this temporary password with the user: <strong>${state.generatedPassword.password}</strong>. They will be prompted to change it on first login.</p>` : ""}
-      <p class="form-note">A temporary password is generated after signup. The user must change it on first login.</p>
-    </form>
-  `;
-}
 
 function passwordChangeOverlay(user) {
   return `
@@ -1618,13 +1591,6 @@ function bindEvents() {
     appSidebar.querySelectorAll("[data-view]").forEach((btn) => btn.addEventListener("click", closeSidebar));
   }
 
-  document.querySelectorAll("[data-auth-mode]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.authMode = button.dataset.authMode;
-      render();
-    });
-  });
-
   document.querySelector("#loginForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -1677,29 +1643,6 @@ function bindEvents() {
     state.activeView = "dashboard";
     state.generatedPassword = null;
     addAudit("User logged in", localUser.phone);
-    saveState();
-    render();
-  });
-
-  document.querySelector("#signupForm")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const phone = normalizePhone(form.get("phone"));
-    const name = String(form.get("name")).trim();
-    const errEl = document.querySelector("#signupError");
-    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; } };
-    if (errEl) errEl.style.display = "none";
-    if (state.users.some((u) => normalizePhone(u.phone) === phone)) return showErr(`An account with phone number ${phone} already exists. Please log in instead.`);
-    if (state.users.some((u) => u.name.toLowerCase() === name.toLowerCase())) return showErr(`The name "${name}" is already registered. Contact your Admin if you need access.`);
-    const user = createUser(form, "Staff");
-    if (auth) {
-      try {
-        await createUserWithEmailAndPassword(auth, phone + "@vvdt.app", user.password);
-      } catch (_) {}
-    }
-    state.generatedPassword = { phone: user.phone, password: user.password };
-    state.authMode = "signup";
-    addAudit("Quick signup created", user.phone);
     saveState();
     render();
   });
