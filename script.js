@@ -168,7 +168,7 @@ const baseState = {
 // Passwords are held in memory only — never written to localStorage or Firestore
 const _runtimePasswords = new Map(); // userId → password
 
-let state = loadState();
+let state = extractPasswords(loadState());
 
 // Session inactivity timeout — 15 minutes
 let _lastActivity = Date.now();
@@ -213,20 +213,23 @@ function loadState() {
         merged.rolePermissions[role] = [...merged.rolePermissions[role], "reports"];
       }
     });
-    // Extract passwords to runtime-only store — never kept in serialised state
-    merged.users = merged.users.map((u) => {
-      if (u.password) {
-        _runtimePasswords.set(u.id, u.password);
-        const { password, ...rest } = u;
-        return rest;
-      }
-      return u;
-    });
     return merged;
   } catch (err) {
     console.error("Load failed:", err);
     return structuredClone(baseState);
   }
+}
+
+function extractPasswords(s) {
+  s.users = s.users.map((u) => {
+    if (u.password) {
+      _runtimePasswords.set(u.id, u.password);
+      const { password, ...rest } = u;
+      return rest;
+    }
+    return u;
+  });
+  return s;
 }
 
 async function saveState() {
