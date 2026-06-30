@@ -168,6 +168,9 @@ const baseState = {
 // Passwords are held in memory only — never written to localStorage or Firestore
 const _runtimePasswords = new Map(); // userId → password
 
+// Always pre-seed built-in account passwords from baseState so they survive page reloads
+baseState.users.forEach((u) => { if (u.password) _runtimePasswords.set(u.id, u.password); });
+
 let state = extractPasswords(loadState());
 
 // Session inactivity timeout — 15 minutes
