@@ -165,6 +165,9 @@ const baseState = {
   ]
 };
 
+// Passwords are held in memory only — never written to localStorage or Firestore
+const _runtimePasswords = new Map(); // userId → password
+
 let state = loadState();
 
 // Session inactivity timeout — 15 minutes
@@ -210,6 +213,15 @@ function loadState() {
         merged.rolePermissions[role] = [...merged.rolePermissions[role], "reports"];
       }
     });
+    // Extract passwords to runtime-only store — never kept in serialised state
+    merged.users = merged.users.map((u) => {
+      if (u.password) {
+        _runtimePasswords.set(u.id, u.password);
+        const { password, ...rest } = u;
+        return rest;
+      }
+      return u;
+    });
     return merged;
   } catch (err) {
     console.error("Load failed:", err);
@@ -227,7 +239,13 @@ async function saveState() {
       if (b1) localStorage.setItem(BACKUP_KEYS[1], b1);
       localStorage.setItem(BACKUP_KEYS[0], current);
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    // Strip passwords and temp credentials before persisting
+    const stateToSave = {
+      ...state,
+      users: state.users.map(({ password, ...rest }) => rest),
+      generatedPassword: null,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
 
     // Sync role permissions to Firestore so all devices stay in sync
     if (db) {
@@ -460,6 +478,20 @@ function addAudit(action, entity, note = "") {
 
 function statusClass(status) {
   return String(status).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+function parseCSV(text) {
+  return text.split(/\r?\n/).filter((l) => l.trim()).map((line) => {
+    const cells = [];
+    let cell = "", inQuote = false;
+    for (const ch of line) {
+      if (ch === '"') { inQuote = !inQuote; }
+      else if (ch === "," && !inQuote) { cells.push(cell.trim()); cell = ""; }
+      else { cell += ch; }
+    }
+    cells.push(cell.trim());
+    return cells;
+  });
 }
 
 function escapeHtml(str) {
@@ -1351,9 +1383,10 @@ function roleManagementPanel() {
 
 function demoAccessPanel() {
   if (!hasAccess(activeUser(), "demoAccess")) return "";
+  if (!import.meta.env.VITE_SHOW_DEMO) return ""; // hidden in production
   return `
     <div class="panel-heading"><div><span class="eyebrow">Admin only</span><h3>Demo Access</h3></div><button class="link-action" data-action="reset-demo" type="button">Reset demo data</button></div>
-    <div class="demo-grid">${demoCredentials.map((item) => `<div class="credential-card static"><b>${item.role}</b><span>${item.phone}</span><small>${item.password} · ${item.note}</small></div>`).join("")}</div>
+    <div class="demo-grid">${demoCredentials.map((item) => `<div class="credential-card static"><b>${escapeHtml(item.role)}</b><span>${escapeHtml(item.phone)}</span><small>${escapeHtml(item.note)}</small></div>`).join("")}</div>
   `;
 }
 
@@ -1424,11 +1457,11 @@ function bulkUserUploadPanel() {
   const preview = state.bulkPreview;
   const validCount = preview ? preview.rows.filter((r) => !r.error).length : 0;
   return `
-    <div class="panel-heading"><div><span class="eyebrow">Import Users</span><h3>Bulk User Upload (Excel / CSV)</h3></div></div>
-    <p class="body-copy">Upload an Excel (.xlsx) or CSV file. Required columns: <b>Staff Name</b>, <b>Phone Number</b>, <b>Role</b>, <b>Profile</b>, <b>Branch</b> (sort code or branch name).</p>
+    <div class="panel-heading"><div><span class="eyebrow">Import Users</span><h3>Bulk User Upload (CSV)</h3></div></div>
+    <p class="body-copy">Upload a CSV file. Required columns: <b>Staff Name</b>, <b>Phone Number</b>, <b>Role</b>, <b>Profile</b>, <b>Branch</b> (sort code or branch name). After import, a CSV of temporary passwords will be downloaded automatically — store and distribute it securely, then delete.</p>
     <div class="entry-form" style="max-width:520px">
-      <label>Select File
-        <input type="file" id="bulkUploadFile" accept=".xlsx,.xls,.csv" />
+      <label>Select CSV File
+        <input type="file" id="bulkUploadFile" accept=".csv" />
       </label>
       <button class="secondary-action" id="bulkParseBtn" type="button">Preview Import</button>
     </div>
@@ -1542,7 +1575,8 @@ function changePasswordModal() {
     const user = activeUser();
     const errEl = document.querySelector("#voluntaryPwError");
     const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; } };
-    if (form.get("currentPw") !== user.password) return showErr("Current password is incorrect.");
+    const currentStored = _runtimePasswords.get(user.id);
+    if (!currentStored || currentStored !== form.get("currentPw")) return showErr("Current password is incorrect.");
     if (!isSimplePasswordValid(form.get("newPw"))) return showErr("New password must be at least 6 characters.");
     if (form.get("newPw") !== form.get("confirmPw")) return showErr("New passwords do not match.");
     const newPw = String(form.get("newPw"));
@@ -1553,7 +1587,7 @@ function changePasswordModal() {
         await updatePassword(auth.currentUser, newPw);
       } catch (_) {}
     }
-    state.users = state.users.map((u) => u.id === user.id ? { ...u, password: newPw } : u);
+    _runtimePasswords.set(user.id, newPw);
     addAudit("Password changed voluntarily", user.phone);
     saveState();
     el.remove();
@@ -1574,7 +1608,8 @@ function bindEvents() {
     if (auth?.currentUser) {
       try { await updatePassword(auth.currentUser, newPw); } catch (_) {}
     }
-    state.users = state.users.map((u) => u.id === state.activeUserId ? { ...u, password: newPw, mustChangePassword: false } : u);
+    _runtimePasswords.set(state.activeUserId, newPw);
+    state.users = state.users.map((u) => u.id === state.activeUserId ? { ...u, mustChangePassword: false } : u);
     addAudit("Password changed", activeUser()?.phone || "");
     saveState();
     render();
@@ -1612,27 +1647,28 @@ function bindEvents() {
       const email = phone + "@vvdt.app";
       try {
         await signInWithEmailAndPassword(auth, email, password);
-        // Firebase Auth succeeded
       } catch (fbErr) {
         const notFound = fbErr.code === "auth/user-not-found" || fbErr.code === "auth/invalid-credential" || fbErr.code === "auth/invalid-email";
-        if (notFound && localUser && localUser.password === password) {
+        const storedPw = _runtimePasswords.get(localUser?.id);
+        if (notFound && localUser && storedPw === password) {
           // Transparent migration: create Firebase Auth account on first login
           try { await createUserWithEmailAndPassword(auth, email, password); } catch (_) {}
         } else {
-          showErr("Incorrect phone number or password, or account is inactive.");
+          showErr("Incorrect phone number or password.");
           return;
         }
       }
     } else {
-      // No Firebase — fall back to local password check
-      if (!localUser || localUser.password !== password) {
-        showErr("Incorrect phone number or password, or account is inactive.");
+      // No Firebase — fall back to runtime password check
+      const storedPw = _runtimePasswords.get(localUser?.id);
+      if (!localUser || storedPw !== password) {
+        showErr("Incorrect phone number or password.");
         return;
       }
     }
 
     if (!localUser) {
-      showErr("Account not found. Contact your administrator.");
+      showErr("Incorrect phone number or password.");
       if (auth) signOut(auth).catch(() => {});
       return;
     }
@@ -1667,8 +1703,14 @@ function bindEvents() {
   });
 
   document.querySelector("[data-action='reset-demo']")?.addEventListener("click", () => {
+    if (!confirm("Reset all demo data? Audit logs will be preserved. This cannot be undone.")) return;
+    const preservedAudit = [...state.auditLogs];
+    _runtimePasswords.clear();
     localStorage.removeItem(STORAGE_KEY);
-    state = structuredClone(baseState);
+    state = { ...structuredClone(baseState), auditLogs: preservedAudit };
+    // Re-seed runtime passwords from baseState
+    baseState.users.forEach((u) => { if (u.password) _runtimePasswords.set(u.id, u.password); });
+    addAudit("Demo data reset", "System");
     render();
   });
 
@@ -1786,7 +1828,8 @@ function bindEvents() {
         showSuccessModal("User deleted", `${target.name} has been permanently removed.`);
       } else if (action === "resetpw") {
         const newPw = createRandomPassword();
-        state.users = state.users.map((u) => u.id === id ? { ...u, password: newPw, mustChangePassword: true } : u);
+        state.users = state.users.map((u) => u.id === id ? { ...u, mustChangePassword: true } : u);
+        _runtimePasswords.set(id, newPw);
         state.generatedPassword = { phone: target.phone, password: newPw };
         addAudit("Password reset by Admin", target.phone);
         saveState(); render();
@@ -1989,20 +2032,17 @@ function bindEvents() {
     showSuccessModal("Access control saved", "Module permissions have been updated for all roles.");
   });
 
-  // Bulk user upload — parse file into preview
+  // Bulk user upload — parse CSV file into preview
   document.querySelector("#bulkParseBtn")?.addEventListener("click", () => {
     const fileInput = document.querySelector("#bulkUploadFile");
     const file = fileInput?.files?.[0];
-    if (!file) return alert("Please select an Excel (.xlsx) or CSV file first.");
-    if (typeof XLSX === "undefined") return alert("Excel parser not loaded. Check your internet connection and refresh.");
+    if (!file) return alert("Please select a CSV file first.");
+    if (!file.name.toLowerCase().endsWith(".csv")) return alert("Only CSV files are accepted. Please export your spreadsheet as CSV.");
 
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+        const raw = parseCSV(e.target.result);
         if (raw.length < 2) {
           state.bulkPreview = { rows: [{ name: "", phone: "", role: "", profile: "", branchDisplay: "", error: "File is empty or has no data rows" }] };
           render(); return;
@@ -2010,32 +2050,31 @@ function bindEvents() {
 
         const header = raw[0].map((h) => String(h).toLowerCase().trim());
         const col = (keywords) => header.findIndex((h) => keywords.some((k) => h.includes(k)));
-        const nameIdx   = col(["staff name", "name"]);
-        const phoneIdx  = col(["phone"]);
-        const roleIdx   = col(["role"]);
+        const nameIdx    = col(["staff name", "name"]);
+        const phoneIdx   = col(["phone"]);
+        const roleIdx    = col(["role"]);
         const profileIdx = col(["profile"]);
-        const branchIdx = col(["branch"]);
+        const branchIdx  = col(["branch"]);
 
         const rows = raw.slice(1).filter((r) => r.some((c) => String(c).trim())).map((row) => {
-          const name       = String(row[nameIdx]    ?? "").trim();
-          const phone      = normalizePhone(String(row[phoneIdx]   ?? "").trim());
-          const role       = String(row[roleIdx]    ?? "").trim();
-          const profile    = String(row[profileIdx] ?? "").trim();
-          const branchRaw  = String(row[branchIdx]  ?? "").trim();
+          const name      = String(row[nameIdx]    ?? "").trim();
+          const phone     = normalizePhone(String(row[phoneIdx]   ?? "").trim());
+          const role      = String(row[roleIdx]    ?? "").trim();
+          const profile   = String(row[profileIdx] ?? "").trim();
+          const branchRaw = String(row[branchIdx]  ?? "").trim();
 
           let error = null;
-          if (!name)                                        error = "Name missing";
-          else if (!phone || phone.length < 9)              error = "Invalid phone";
-          else if (!state.roleCatalog.find((r) => r.key === role)) error = `Unknown role: ${role || "(blank)"}`;
-          else if (state.users.some((u) => normalizePhone(u.phone) === phone)) error = "Phone already registered";
+          if (!name)                                                             error = "Name missing";
+          else if (!phone || phone.length < 9)                                  error = "Invalid phone";
+          else if (!state.roleCatalog.find((r) => r.key === role))              error = `Unknown role: ${role || "(blank)"}`;
+          else if (state.users.some((u) => normalizePhone(u.phone) === phone))  error = "Phone already registered";
           else if (state.users.some((u) => u.name.toLowerCase() === name.toLowerCase())) error = "Name already registered";
 
           let branchId = "zonal";
           let branchDisplay = "Zonal";
           if (!isZonalRole(role) && !isSuperRole(role)) {
             const found = state.branches.find((b) =>
-              b.code === branchRaw ||
-              b.id === branchRaw ||
+              b.code === branchRaw || b.id === branchRaw ||
               b.name.toLowerCase() === branchRaw.toLowerCase()
             );
             if (found) { branchId = found.id; branchDisplay = `${found.code} · ${found.name}`; }
@@ -2050,10 +2089,10 @@ function bindEvents() {
         saveState();
         render();
       } catch (err) {
-        alert("Failed to parse file: " + (err.message || String(err)));
+        alert("Failed to parse CSV: " + (err.message || String(err)));
       }
     };
-    reader.readAsArrayBuffer(file);
+    reader.readAsText(file, "UTF-8");
   });
 
   // Bulk user upload — import valid rows
@@ -2064,28 +2103,38 @@ function bindEvents() {
     if (!valid.length) return;
 
     let nextId = Math.max(0, ...state.users.map((u) => u.id)) + 1;
+    const createdCredentials = [];
     valid.forEach((row) => {
       const password = createRandomPassword();
+      const id = nextId++;
       state.users.push({
-        id: nextId++,
+        id,
         staffNo: `USR${String(state.users.length + 1).padStart(3, "0")}`,
         name: row.name,
         phone: row.phone,
-        password,
         role: row.role,
         profile: row.profile,
         branchId: row.branchId,
         active: true,
-        mustChangePassword: true
+        mustChangePassword: true,
       });
+      _runtimePasswords.set(id, password);
+      createdCredentials.push({ name: row.name, phone: row.phone, password });
     });
+
+    // Download a credentials sheet for the admin to distribute
+    const csvLines = [
+      "Name,Phone,Temporary Password",
+      ...createdCredentials.map((c) => `"${c.name}","${c.phone}","${c.password}"`),
+    ].join("\r\n");
+    downloadFile(csvLines, `vvdt-bulk-temp-passwords-${new Date().toISOString().slice(0,10)}.csv`, "text/csv;charset=utf-8;");
 
     const count = valid.length;
     state.bulkPreview = null;
-    addAudit("Bulk user import", `${count} users`, "Imported via Excel upload");
+    addAudit("Bulk user import", `${count} users`, "Imported via CSV upload");
     saveState();
     render();
-    showSuccessModal("Import complete", `${count} user${count !== 1 ? "s" : ""} created successfully. Each user will be prompted to set their password on first login.`);
+    showSuccessModal("Import complete", `${count} user${count !== 1 ? "s" : ""} created. A CSV with temporary passwords has been downloaded — distribute securely and delete after use.`);
   });
 
   // Bulk user upload — clear preview
@@ -2105,15 +2154,15 @@ function createUser(form, forcedRole) {
     staffNo: `USR${String(state.users.length + 1).padStart(3, "0")}`,
     name: String(form.get("name")).trim(),
     phone: normalizePhone(form.get("phone")),
-    password,
     role,
     profile: String(form.get("profile")),
     branchId: noBranch ? "zonal" : String(form.get("branchId")),
     active: true,
-    mustChangePassword: true
+    mustChangePassword: true,
   };
   state.users.push(user);
-  return user;
+  _runtimePasswords.set(user.id, password);
+  return { ...user, password }; // password returned for admin display only, never stored in state
 }
 
 function updateEntryStatus(id, status) {
