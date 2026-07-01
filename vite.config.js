@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 
-export default defineConfig({
-  base: '/vvdtcoastalzone/',
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? '/vvdtcoastalzone/' : '/',
   publicDir: 'public',
   build: {
     outDir: 'dist',
@@ -14,4 +14,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))
